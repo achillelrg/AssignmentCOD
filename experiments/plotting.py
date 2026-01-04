@@ -53,7 +53,25 @@ def plot_convergence(csv_path: str, outpath: str = None, ykey: str = "gbest_f"):
     ax.set_title(title)
 
     if outpath is None:
-        outpath = os.path.join(BASE_FIG_DIR, "convergence", f"{meta['base']}_{ykey}_conv.png")
+        # Instead of hardcoded BASE_FIG_DIR, try to save near the CSV if possible, or use a default.
+        # Current behavior: hardcoded BASE_FIG_DIR = data/figures.
+        # New behavior: if csv_path is in data/PartA/, we might want data/PartA/figures/convergence?
+        # Let's check where the CSV is.
+        csv_dir = os.path.dirname(csv_path)
+        # simplistic heuristic: if "Part" is in the path, use that structure
+        if "Part" in csv_dir:
+            # e.g. data/PartA/results or data/PartA
+            if os.path.basename(csv_dir) == "results":
+                base_dir = os.path.dirname(csv_dir) # up one level -> data/PartA
+            else:
+                base_dir = csv_dir
+            fig_dir = os.path.join(base_dir, "figures", "convergence")
+        else:
+            # fallback to global
+            fig_dir = os.path.join(BASE_FIG_DIR, "convergence")
+            
+        outpath = os.path.join(fig_dir, f"{meta['base']}_{ykey}_conv.png")
+        
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)

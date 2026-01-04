@@ -1,0 +1,14 @@
+LOAD C:\Users\achille.larregle\OneDrive - ESTIA\Bureau\CRANFIELD\CRANFIELD COURSE\COD\COD_Assignment\data\airfoils\baseline.dat
+PANE
+
+OPER
+VISC 1000000.0
+MACH 0.1
+ITER 200
+PACC
+tmptpf2zq29.log
+
+ASEQ 0.0 6.0 0.5
+PACC
+QUIT
+

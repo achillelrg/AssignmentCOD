@@ -7,26 +7,48 @@ from typing import Optional, Tuple
 import numpy as np
 
 # On WSL / Linux we just call the system xfoil (installed with: sudo apt install xfoil)
-XFOIL_EXE = "xfoil"
+# On Windows, we look for xfoil.exe in PATH or XFOIL_PATH env var
+import shutil
+import uuid
+
+# Try to find xfoil in standard locations or PATH
+_custom_path = os.environ.get("XFOIL_PATH", "")
+if _custom_path and os.path.exists(_custom_path):
+    XFOIL_EXE = _custom_path
+else:
+    # Check for xfoil.exe (Windows) or xfoil (Linux/Mac) in PATH
+    _found = shutil.which("xfoil.exe") or shutil.which("xfoil")
+    
+    # If not in PATH, look in project root "Xfoil" folder
+    if not _found:
+        # Assuming we are in utils/, project root is ..
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local_xfoil = os.path.join(root, "Xfoil", "xfoil.exe")
+        if os.path.exists(local_xfoil):
+            _found = local_xfoil
+            
+    # Fallback to "xfoil" if not found, assuming it might be aliased or in a non-standard way
+    XFOIL_EXE = _found if _found else "xfoil"
+
 XFOIL_DIR = "."  # run in project folder
 print(f"[xfoil_runner] Using XFOIL at: {XFOIL_EXE}")
 
 
-def _run_xfoil_script(script: str) -> Tuple[int, str, str]:
+def _run_xfoil_script(script: str, workdir: str = ".") -> Tuple[int, str, str]:
     """
     Run XFOIL with the given multiline 'script' sent to stdin.
     """
-    os.makedirs(XFOIL_DIR, exist_ok=True)
-
+    os.makedirs(workdir, exist_ok=True)
+    
     # Keep a copy of the script on disk for debugging
     with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".inp", dir=XFOIL_DIR, encoding="ascii"
+        mode="w", delete=False, suffix=".inp", dir=workdir, encoding="ascii"
     ) as f:
         f.write(script)
         f.write("\n")
         script_path = f.name
 
-    print(f"[xfoil_runner] cwd={XFOIL_DIR}")
+    print(f"[xfoil_runner] cwd={workdir}")
     print(f"[xfoil_runner] Script kept at: {script_path}")
 
     proc = subprocess.run(
@@ -34,7 +56,7 @@ def _run_xfoil_script(script: str) -> Tuple[int, str, str]:
         input=script.encode("ascii"),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        cwd=XFOIL_DIR,
+        cwd=workdir,
     )
 
     out = proc.stdout.decode(errors="ignore")
@@ -48,7 +70,7 @@ def _run_xfoil_script(script: str) -> Tuple[int, str, str]:
     print("[xfoil_runner] --- stderr ---")
     print(err[:400])
 
-    return proc.returncode, out, err
+    return proc.returncode, out, err, script_path
 
 
 def run_xfoil_single_alpha(
@@ -62,7 +84,10 @@ def run_xfoil_single_alpha(
     Run XFOIL at a single angle of attack.
     Returns (Cl, Cd, Cm).
     """
-    dat_full = os.path.abspath(dat_path)
+    # Copy .dat to CWD with a safe name to avoid path issues (spaces, etc.)
+    local_dat = f"tmp_{uuid.uuid4().hex[:8]}.dat"
+    shutil.copy(dat_path, local_dat)
+    dat_full = local_dat  # XFOIL will load this local file
 
     # polar file will be created in the XFOIL_DIR (same dir as xfoil executable)
     with tempfile.NamedTemporaryFile(
@@ -85,11 +110,13 @@ def run_xfoil_single_alpha(
         "",
         f"ALFA {alpha}",
         "PACC",
-        "QUIT",
+        "QUIT",  # Exit OPER
+        "QUIT",  # Exit XFOIL
     ]
-    script = "\n".join(script_lines) + "\n"
+    sep = "\r\n" if os.name == 'nt' else "\n"
+    script = sep.join(script_lines) + sep
 
-    script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
+    _, _, _, script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
 
     # Parse polar file
     if not os.path.exists(polar_path):
@@ -134,6 +161,11 @@ def run_xfoil_single_alpha(
         os.remove(script_path)
     except OSError:
         pass
+    try:
+        if os.path.exists(local_dat):
+            os.remove(local_dat)
+    except OSError:
+        pass
 
     return Cl, Cd, Cm
 
@@ -151,7 +183,10 @@ def run_xfoil_polar(
     Run XFOIL polar over a range of angles.
     Returns arrays: alpha, Cl, Cd, Cm.
     """
-    dat_full = os.path.abspath(dat_path)
+    # Copy .dat to CWD with a safe name to avoid path issues (spaces, etc.)
+    local_dat = f"tmp_{uuid.uuid4().hex[:8]}.dat"
+    shutil.copy(dat_path, local_dat)
+    dat_full = local_dat
 
     with tempfile.NamedTemporaryFile(
         delete=False, suffix=".log", dir=XFOIL_DIR
@@ -172,11 +207,13 @@ def run_xfoil_polar(
         "",
         f"ASEQ {a_start} {a_end} {a_step}",
         "PACC",
-        "QUIT",
+        "QUIT",  # Exit OPER
+        "QUIT",  # Exit XFOIL
     ]
-    script = "\n".join(script_lines) + "\n"
+    sep = "\r\n" if os.name == 'nt' else "\n"
+    script = sep.join(script_lines) + sep
 
-    script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
+    _, _, _, script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
 
     if not os.path.exists(polar_path):
         print(f"[xfoil_runner] polar file {polar_path} does not exist.")
@@ -211,6 +248,11 @@ def run_xfoil_polar(
         pass
     try:
         os.remove(script_path)
+    except OSError:
+        pass
+    try:
+        if os.path.exists(local_dat):
+            os.remove(local_dat)
     except OSError:
         pass
 

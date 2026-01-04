@@ -49,14 +49,33 @@ def plot_convergence(csv_path: str):
     ax.set_title("Airfoil optimisation convergence")
 
     base = os.path.splitext(os.path.basename(csv_path))[0]
-    outpath = os.path.join(BASE_FIG_DIR, f"{base}_convergence.png")
+    
+    # Use helper to find path
+    fig_dir = _infer_output_dir(csv_path, "convergence")
+    outpath = os.path.join(fig_dir, f"{base}_convergence.png")
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
 
 
-def plot_geometry(best_vec):
+def _infer_output_dir(csv_path: str, subdir: str = "airfoil") -> str:
+    """Helper to infer figure output directory from CSV location."""
+    if not csv_path:
+        return os.path.join("data", "figures", subdir)
+        
+    csv_dir = os.path.dirname(csv_path)
+    if "Part" in csv_dir:
+        # e.g. data/PartB/results -> data/PartB/figures/subdir
+        if os.path.basename(csv_dir) == "results":
+            base_dir = os.path.dirname(csv_dir)
+        else:
+            base_dir = csv_dir
+        return os.path.join(base_dir, "figures", subdir)
+    else:
+        return os.path.join("data", "figures", subdir)
+
+def plot_geometry(best_vec, out_csv: str = None):
     # Optimised geometry
     Au_opt = best_vec[:3]
     Al_opt = best_vec[3:]
@@ -77,13 +96,14 @@ def plot_geometry(best_vec):
     ax.grid(True, linestyle=":")
     ax.legend()
 
-    outpath = os.path.join(BASE_FIG_DIR, "geometry_comparison.png")
+    fig_dir = _infer_output_dir(out_csv, "geometry")
+    outpath = os.path.join(fig_dir, "geometry_comparison.png")
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
 
-def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, outpath=None):
+def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, outpath=None, out_csv: str = None):
     import numpy as np
     import matplotlib.pyplot as plt
 
@@ -135,7 +155,8 @@ def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, outpath=None):
                         ha="center", va="bottom", fontsize=9, rotation=0)
 
     if outpath is None:
-        outpath = os.path.join(BASE_FIG_DIR, "coeff_bar.png")
+        fig_dir = _infer_output_dir(out_csv, "coefficients")
+        outpath = os.path.join(fig_dir, "coeff_bar.png")
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -143,7 +164,7 @@ def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, outpath=None):
 
 
 
-def plot_polar(best_vec, Re=1e6):
+def plot_polar(best_vec, Re=1e6, out_csv: str = None):
     # Write .dat for baseline and optimised
     os.makedirs(os.path.join("data", "airfoils"), exist_ok=True)
     base_dat = os.path.join("data", "airfoils", "baseline.dat")
@@ -169,7 +190,8 @@ def plot_polar(best_vec, Re=1e6):
     ax.grid(True, linestyle=":")
     ax.legend()
 
-    outpath = os.path.join(BASE_FIG_DIR, "drag_polar.png")
+    fig_dir = _infer_output_dir(out_csv, "polar")
+    outpath = os.path.join(fig_dir, "drag_polar.png")
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)

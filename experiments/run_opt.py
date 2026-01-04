@@ -8,7 +8,7 @@ import numpy as np
 
 from benchmarks.griewank import griewank
 from optimizer.pso import PSO
-from experiments.plotting import plot_swarm_2d  # for optional 2D swarm plot
+from experiments.plotting import plot_swarm_2d, plot_convergence  # for optional 2D swarm plot and convergence
 
 
 def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: int = 200, log_path: str = "run.csv"):
@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--vmax_frac", type=float, default=0.2)
     parser.add_argument("--topology", type=str, default="gbest")  # or lbest
     parser.add_argument("--trace_every", type=int, default=0, help="Record 2D swarm positions every N iters (D=2 only)")
+    parser.add_argument("--part", type=str, default=None, help="Assignment Part (A, B, or C) to organize outputs")
     parser.add_argument("--out", type=str, default=None, help="CSV log path (overrides default data/results/... location)")
     args = parser.parse_args()
 
@@ -81,8 +82,12 @@ def main():
         os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
     else:
         # Default structured location
-        bucket = "single_runs" if args.seed == 42 else "multi_runs"
-        folder = os.path.join("data", "results", bucket)
+        if args.part:
+            folder = os.path.join("data", f"Part{args.part}", "results")
+        else:
+            bucket = "single_runs" if args.seed == 42 else "multi_runs"
+            folder = os.path.join("data", "results", bucket)
+            
         os.makedirs(folder, exist_ok=True)
         log_path = os.path.join(
             folder,
@@ -96,12 +101,25 @@ def main():
     if args.D == 2 and args.trace_every > 0:
         trace = opt.positions_trace() if hasattr(opt, "positions_trace") else []
         if trace:
-            swarm_dir = os.path.join("data", "figures", "swarm")
+            # Save swarm plot in the SAME folder as the log, but with a suffix, or a 'figures' subfolder?
+            # User wants "clarity". Saving in data/PartA/figures seems good, or just data/PartA/.
+            # Let's keep it simple: data/figures/swarm is global.
+            # BUT if --part is set, maybe we want data/PartA/figures?
+            # For now, let's just stick to the requested structure: data/PartA/
+            if args.part:
+                swarm_dir = os.path.join("data", f"Part{args.part}", "figures")
+            else:
+                swarm_dir = os.path.join("data", "figures", "swarm")
+
             os.makedirs(swarm_dir, exist_ok=True)
             base = os.path.splitext(os.path.basename(log_path))[0]
             out_png = os.path.join(swarm_dir, f"{base}_swarm2d.png")
             plot_swarm_2d(log_path, trace, outpath=out_png)
             print("Saved 2D swarm trajectory:", out_png)
+
+    # Always plot convergence
+    conv_png = plot_convergence(log_path)
+    print("Saved convergence plot:", conv_png)
 
 
 if __name__ == "__main__":
