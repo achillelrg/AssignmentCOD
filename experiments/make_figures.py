@@ -1,12 +1,13 @@
 import argparse
 import glob
 import os
-from plotting import (
+from experiments.plotting import (
     plot_convergence,
     plot_convergence_overlay,
     plot_final_boxplot,
     plot_success_vs_budget,
 )
+
 
 def main():
     ap = argparse.ArgumentParser()

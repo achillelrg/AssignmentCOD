@@ -1,0 +1,16 @@
+N
+LOAD C:\Users\ACHILL~1.LAR\AppData\Local\Temp\tmpqrmtfm1q.dat
+PANE
+
+OPER
+VISC 1000000.0
+MACH 0.1
+ITER 200
+PACC
+tmpcqnq4rbv.log
+
+ALFA 3.0
+PACC
+QUIT
+
+
