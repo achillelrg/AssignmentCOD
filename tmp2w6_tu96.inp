@@ -1,7 +1,7 @@
 PLOP
 G
 
-LOAD airfoil_2f4a5820.dat
+LOAD airfoil_fb746c15.dat
 PANE
 OPER
 VISC 1000000.0
