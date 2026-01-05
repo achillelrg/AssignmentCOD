@@ -42,6 +42,7 @@ def main():
         lambda v: airfoil_fitness(np.array(v), Re=1e6, alpha=3.0),
         opt,
         eval_budget=eval_budget,
+        f_target=-1e9, # Do not stop early for negative fitness
         log_path=out_csv,
     )
     print("Best design:", best)

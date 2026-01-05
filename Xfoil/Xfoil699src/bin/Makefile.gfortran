@@ -39,7 +39,7 @@ PLTOBJ = ../plotlib/libPlt.a
 #PLTOBJ = -lPlt 
 
 # The extra location arg here is for Linux which places X libs in /usr/X11R6
-PLTLIB = -L/usr/X11R6/lib -lX11
+PLTLIB = -lX11
 
 ###================================================
 ###  Default compilers and flags
@@ -66,13 +66,13 @@ INSTALLCMD = install -s
 ### GNU gfortran
 #FC = gfortran  
 FC = gfortran -m64  
-FFLAGS = -O2 -fomit-frame-pointer
-FFLOPT = -O3 -fomit-frame-pointer
+FFLAGS = -O2 -fomit-frame-pointer -fallow-argument-mismatch -ffixed-line-length-none
+FFLOPT = -O3 -fomit-frame-pointer -fallow-argument-mismatch -ffixed-line-length-none
 #FFLAGS = -O3
 #FFLOPT = -O3
 # Debug flags (symbols, array bounds)
 #FFLAGS = -g -O0 -C
-PLTOBJ = /usr/local/lib/libPlt_gfortran.a
+#PLTOBJ = /usr/local/lib/libPlt_gfortran.a
 #
 ##--------------------------
 # Ancient compile options

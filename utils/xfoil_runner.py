@@ -1,262 +1,230 @@
-# utils/xfoil_runner.py
 import os
+import shutil
 import subprocess
 import tempfile
-from typing import Optional, Tuple
-
-import numpy as np
-
-# On WSL / Linux we just call the system xfoil (installed with: sudo apt install xfoil)
-# On Windows, we look for xfoil.exe in PATH or XFOIL_PATH env var
-import shutil
 import uuid
+import numpy as np
+from typing import Tuple, Optional
 
-# Try to find xfoil in standard locations or PATH
+# Attempt to import xfoil library (for Windows/Direct usage)
+try:
+    from xfoil import XFoil
+    from xfoil.model import Airfoil
+    HAS_XFOIL_LIB = True
+except ImportError:
+    HAS_XFOIL_LIB = False
+
+# Fallback XFOIL executable setup
 _custom_path = os.environ.get("XFOIL_PATH", "")
 if _custom_path and os.path.exists(_custom_path):
     XFOIL_EXE = _custom_path
 else:
-    # Check for xfoil.exe (Windows) or xfoil (Linux/Mac) in PATH
-    _found = shutil.which("xfoil.exe") or shutil.which("xfoil")
-    
-    # If not in PATH, look in project root "Xfoil" folder
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_xfoil_exe = os.path.join(root, "Xfoil", "xfoil.exe")
+    local_xfoil_bin = os.path.join(root, "Xfoil", "xfoil")
+    _found = None
+    if os.path.exists(local_xfoil_exe):
+        _found = local_xfoil_exe
+    elif os.path.exists(local_xfoil_bin):
+        _found = local_xfoil_bin
     if not _found:
-        # Assuming we are in utils/, project root is ..
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        local_xfoil = os.path.join(root, "Xfoil", "xfoil.exe")
-        if os.path.exists(local_xfoil):
-            _found = local_xfoil
-            
-    # Fallback to "xfoil" if not found, assuming it might be aliased or in a non-standard way
+        _found = shutil.which("xfoil.exe") or shutil.which("xfoil")
     XFOIL_EXE = _found if _found else "xfoil"
 
 XFOIL_DIR = "."  # run in project folder
-print(f"[xfoil_runner] Using XFOIL at: {XFOIL_EXE}")
 
+# ---------------------------------------------------------------------------
+# LIBRARY-BASED RUNNER (Windows Friendly)
+# ---------------------------------------------------------------------------
 
-def _run_xfoil_script(script: str, workdir: str = ".") -> Tuple[int, str, str]:
-    """
-    Run XFOIL with the given multiline 'script' sent to stdin.
-    """
-    os.makedirs(workdir, exist_ok=True)
+def _run_lib_single(dat_path, alpha, Re, mach, n_iter):
+    """Run using xfoil python library."""
+    xf = XFoil()
+    # Mute output if possible, xfoil lib prints to stdout usually
+    xf.print = False 
     
-    # Keep a copy of the script on disk for debugging
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".inp", dir=workdir, encoding="ascii"
-    ) as f:
+    # Load airfoil
+    # xfoil lib usually wants coordinates, not file, but Airfoil class might load file
+    # Or XFoil.airfoil property.
+    # We will try loading coordinates from the dat file manually.
+    try:
+        with open(dat_path, 'r') as f:
+            lines = f.readlines()
+        # Skip header? XFOIL dat has name on line 1
+        coords = []
+        for line in lines[1:]:
+            parts = line.split()
+            if len(parts) >= 2:
+                coords.append((float(parts[0]), float(parts[1])))
+        coords = np.array(coords)
+        
+        xf.airfoil = Airfoil(x=coords[:,0], y=coords[:,1])
+    except Exception as e:
+        print(f"[xfoil_lib] Error loading coordinates: {e}")
+        return None, None, None
+
+    # Setup
+    xf.Re = Re
+    xf.M = mach
+    xf.max_iter = n_iter
+    
+    # Run
+    try:
+        xf.a(alpha)
+        # Check convergence? xf.converged property might exist
+        return xf.Cl, xf.Cd, xf.Cm
+    except Exception:
+        return None, None, None
+
+def _run_lib_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
+    """Run polar using xfoil python library."""
+    xf = XFoil()
+    xf.print = False
+    
+    # Load coords 
+    with open(dat_path, 'r') as f:
+        lines = f.readlines()
+    coords = []
+    for line in lines[1:]:
+        p = line.split()
+        if len(p) >= 2: coords.append((float(p[0]), float(p[1])))
+    coords = np.array(coords)
+    xf.airfoil = Airfoil(x=coords[:,0], y=coords[:,1])
+    
+    xf.Re = Re
+    xf.M = mach
+    xf.max_iter = n_iter
+    
+    alphas = np.arange(a_start, a_end + a_step/2, a_step)
+    cl_list, cd_list, cm_list, a_list = [], [], [], []
+    
+    # Sequential run
+    xf.reset_bls() # reset boundary layer
+    for a in alphas:
+        xf.a(a)
+        # We assume values persist even if not converged, or check something?
+        # xfoil lib usually keeps last state.
+        # Ideally we only take converged.
+        cl_list.append(xf.Cl)
+        cd_list.append(xf.Cd)
+        cm_list.append(xf.Cm)
+        a_list.append(a)
+            
+    return np.array(a_list), np.array(cl_list), np.array(cd_list), np.array(cm_list)
+
+
+# ---------------------------------------------------------------------------
+# SUBPROCESS-BASED RUNNER (Linux Fallback)
+# ---------------------------------------------------------------------------
+
+def _run_xfoil_script(script: str, workdir: str = ".") -> Tuple[int, str, str, str]:
+    os.makedirs(workdir, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".inp", dir=workdir, encoding="ascii") as f:
         f.write(script)
         f.write("\n")
         script_path = f.name
+    with open(script_path, "r") as f_in:
+        proc = subprocess.run([XFOIL_EXE], stdin=f_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=workdir)
+    return proc.returncode, proc.stdout.decode(errors="ignore"), proc.stderr.decode(errors="ignore"), script_path
 
-    print(f"[xfoil_runner] cwd={workdir}")
-    print(f"[xfoil_runner] Script kept at: {script_path}")
-
-    proc = subprocess.run(
-        [XFOIL_EXE],
-        input=script.encode("ascii"),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=workdir,
-    )
-
-    out = proc.stdout.decode(errors="ignore")
-    err = proc.stderr.decode(errors="ignore")
-
-    print(f"[xfoil_runner] returncode={proc.returncode}")
-    print("[xfoil_runner] --- stdout head ---")
-    print(out[:400])
-    print("[xfoil_runner] --- stdout tail ---")
-    print(out[-400:])
-    print("[xfoil_runner] --- stderr ---")
-    print(err[:400])
-
-    return proc.returncode, out, err, script_path
-
-
-def run_xfoil_single_alpha(
-    dat_path: str,
-    alpha: float = 3.0,
-    Re: float = 1e6,
-    mach: float = 0.1,
-    n_iter: int = 200,
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """
-    Run XFOIL at a single angle of attack.
-    Returns (Cl, Cd, Cm).
-    """
-    # Copy .dat to CWD with a safe name to avoid path issues (spaces, etc.)
-    local_dat = f"tmp_{uuid.uuid4().hex[:8]}.dat"
-    shutil.copy(dat_path, local_dat)
-    dat_full = local_dat  # XFOIL will load this local file
-
-    # polar file will be created in the XFOIL_DIR (same dir as xfoil executable)
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=".log", dir=XFOIL_DIR
-    ) as out:
-        polar_name = os.path.basename(out.name)
-        polar_path = out.name
-
-    # build script with REAL newlines (no '\n' inside each command)
-    script_lines = [
-        f"LOAD {dat_full}",
-        "PANE",
-        "",
-        "OPER",
-        f"VISC {Re}",
-        f"MACH {mach}",
-        f"ITER {n_iter}",
-        "PACC",
-        polar_name,
-        "",
-        f"ALFA {alpha}",
-        "PACC",
-        "QUIT",  # Exit OPER
-        "QUIT",  # Exit XFOIL
-    ]
-    sep = "\r\n" if os.name == 'nt' else "\n"
-    script = sep.join(script_lines) + sep
-
-    _, _, _, script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
-
-    # Parse polar file
-    if not os.path.exists(polar_path):
-        print(f"[xfoil_runner] polar file {polar_path} does not exist.")
-        raise RuntimeError("XFOIL did not produce polar file.")
-
-    with open(polar_path, "r") as f:
-        lines = f.readlines()
-
-    # find the last data line (skip headers, comments)
-    data_line: Optional[str] = None
-    for line in lines:
-        s = line.strip()
-        if not s:
-            continue
-        if s[0] in ("#", "!"):
-            continue
-        data_line = line
-
-    if data_line is None:
-        print("[xfoil_runner] polar file had no data lines.")
-        print("".join(lines[-10:]))
-        raise RuntimeError("Could not parse XFOIL polar output for single alpha.")
-
-    tokens = data_line.split()
-    # typical format: alpha, Cl, Cd, Cd_visc, Cd_form, Cm, ...
-    try:
-        alpha_val = float(tokens[0])
-        Cl = float(tokens[1])
-        Cd = float(tokens[2])
-        Cm = float(tokens[5])
-    except Exception as e:
-        print("[xfoil_runner] Could not parse data line:", data_line)
-        raise RuntimeError("Could not parse XFOIL polar output for single alpha.") from e
-
-    # Cleanup temporary files
-    try:
-        os.remove(polar_path)
-    except OSError:
-        pass
-    try:
-        os.remove(script_path)
-    except OSError:
-        pass
-    try:
-        if os.path.exists(local_dat):
-            os.remove(local_dat)
-    except OSError:
-        pass
-
-    return Cl, Cd, Cm
-
-
-def run_xfoil_polar(
-    dat_path: str,
-    a_start: float,
-    a_end: float,
-    a_step: float,
-    Re: float = 1e6,
-    mach: float = 0.1,
-    n_iter: int = 200,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Run XFOIL polar over a range of angles.
-    Returns arrays: alpha, Cl, Cd, Cm.
-    """
-    # Copy .dat to CWD with a safe name to avoid path issues (spaces, etc.)
-    local_dat = f"tmp_{uuid.uuid4().hex[:8]}.dat"
-    shutil.copy(dat_path, local_dat)
-    dat_full = local_dat
-
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=".log", dir=XFOIL_DIR
-    ) as out:
-        polar_name = os.path.basename(out.name)
-        polar_path = out.name
-
-    script_lines = [
-        f"LOAD {dat_full}",
-        "PANE",
-        "",
-        "OPER",
-        f"VISC {Re}",
-        f"MACH {mach}",
-        f"ITER {n_iter}",
-        "PACC",
-        polar_name,
-        "",
-        f"ASEQ {a_start} {a_end} {a_step}",
-        "PACC",
-        "QUIT",  # Exit OPER
-        "QUIT",  # Exit XFOIL
-    ]
-    sep = "\r\n" if os.name == 'nt' else "\n"
-    script = sep.join(script_lines) + sep
-
-    _, _, _, script_path = _run_xfoil_script(script, workdir=XFOIL_DIR)
-
-    if not os.path.exists(polar_path):
-        print(f"[xfoil_runner] polar file {polar_path} does not exist.")
-        raise RuntimeError("XFOIL did not produce polar file.")
-
-    alphas: list[float] = []
-    cls: list[float] = []
-    cds: list[float] = []
-    cms: list[float] = []
-
-    with open(polar_path, "r") as f:
-        for line in f:
-            s = line.strip()
-            if not s or s[0] in ("#", "!"):
-                continue
-            tokens = s.split()
+def _parse_xfoil_stdout(out: str) -> dict:
+    results_map = {}
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if "a =" in line and "CL =" in line:
             try:
-                a = float(tokens[0])
-                cl = float(tokens[1])
-                cd = float(tokens[2])
-                cm = float(tokens[5])
-            except Exception:
+                parts = line.replace("=", " ").split()
+                idx_a = parts.index("a")
+                val_a = float(parts[idx_a + 1])
+                idx_cl = parts.index("CL")
+                val_cl = float(parts[idx_cl + 1])
+                if i + 1 < len(lines):
+                    next_line = lines[i+1]
+                    if "Cm =" in next_line and "CD =" in next_line:
+                        parts2 = next_line.replace("=", " ").split()
+                        idx_cm = parts2.index("Cm")
+                        val_cm = float(parts2[idx_cm + 1])
+                        idx_cd = parts2.index("CD")
+                        val_cd = float(parts2[idx_cd + 1])
+                        results_map[val_a] = (val_cl, val_cd, val_cm)
+            except (ValueError, IndexError):
                 continue
-            alphas.append(a)
-            cls.append(cl)
-            cds.append(cd)
-            cms.append(cm)
+    return results_map
 
-    try:
-        os.remove(polar_path)
-    except OSError:
-        pass
-    try:
-        os.remove(script_path)
-    except OSError:
-        pass
-    try:
-        if os.path.exists(local_dat):
-            os.remove(local_dat)
-    except OSError:
-        pass
+def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
+    # Copy .dat locally
+    unique_id = uuid.uuid4().hex[:8]
+    local_dat = f"airfoil_{unique_id}.dat"
+    shutil.copy(dat_path, local_dat)
+    
+    # Fix line endings
+    with open(local_dat, 'rb') as f: content = f.read().replace(b'\r\n', b'\n')
+    with open(local_dat, 'wb') as f: f.write(content)
 
-    if not alphas:
-        raise RuntimeError("No valid polar data parsed from XFOIL.")
+    script_lines = [
+        "PLOP", "G", "",
+        f"LOAD {local_dat}",
+        "PANE", "OPER",
+        f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
+        f"ALFA {alpha}", "", "QUIT"
+    ]
+    script = ("\r\n" if os.name == 'nt' else "\n").join(script_lines) + "\n"
+    
+    rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
+    
+    # Cleanup
+    for p in [spath, local_dat]:
+        if os.path.exists(p): os.remove(p)
 
+    results = _parse_xfoil_stdout(out)
+    if not results: return None, None, None
+    best_a = min(results.keys(), key=lambda x: abs(x - alpha))
+    if abs(best_a - alpha) > 0.1: return None, None, None # Too far
+    return results[best_a]
+
+def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
+    unique_id = uuid.uuid4().hex[:8]
+    local_dat = f"airfoil_{unique_id}.dat"
+    shutil.copy(dat_path, local_dat)
+    with open(local_dat, 'rb') as f: content = f.read().replace(b'\r\n', b'\n')
+    with open(local_dat, 'wb') as f: f.write(content)
+
+    script_lines = [
+        "PLOP", "G", "",
+        f"LOAD {local_dat}",
+        "PANE", "OPER",
+        f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
+        f"ASEQ {a_start} {a_end} {a_step}", "", "QUIT"
+    ]
+    script = ("\r\n" if os.name == 'nt' else "\n").join(script_lines) + "\n"
+    rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
+    
+    for p in [spath, local_dat]:
+        if os.path.exists(p): os.remove(p)
+
+    results = _parse_xfoil_stdout(out)
+    alphas, cls, cds, cms = [], [], [], []
+    for a in sorted(results.keys()):
+        cl, cd, cm = results[a]
+        alphas.append(a)
+        cls.append(cl)
+        cds.append(cd)
+        cms.append(cm)
     return np.array(alphas), np.array(cls), np.array(cds), np.array(cms)
+
+# ---------------------------------------------------------------------------
+# PUBLIC API
+# ---------------------------------------------------------------------------
+
+def run_xfoil_single_alpha(dat_path: str, alpha: float = 3.0, Re: float = 1e6, mach: float = 0.1, n_iter: int = 200) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    if HAS_XFOIL_LIB:
+        return _run_lib_single(dat_path, alpha, Re, mach, n_iter)
+    else:
+        # Fallback
+        return _run_subprocess_single(dat_path, alpha, Re, mach, n_iter)
+
+def run_xfoil_polar(dat_path: str, a_start: float, a_end: float, a_step: float, Re: float = 1e6, mach: float = 0.1, n_iter: int = 200) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if HAS_XFOIL_LIB:
+        return _run_lib_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter)
+    else:
+        return _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter)

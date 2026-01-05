@@ -11,10 +11,10 @@ FTNLIB =
 
 #========================================
 #  Uncomment for Intel Fortran Compiler
-FC = ifort
-FLG = -O
+FC = gfortran
+FLG = -O -g -fcheck=all
 PLTLIB = -L/usr/X11R6/lib -lX11
-FTNLIB = -Vaxlib
+FTNLIB =
 
 #  Additional IFC stuff needed on MIT's Athena system
 #FC = ifc

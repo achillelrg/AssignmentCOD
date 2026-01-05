@@ -5,16 +5,25 @@ import re
 from typing import List, Tuple, Dict
 
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 BASE_FIG_DIR = os.path.join("data", "figures")
+
 
 def _ensure_dir(path: str):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
-def read_log(csv_path: str) -> pd.DataFrame:
+def read_log(csv_path: str):
     """Read one run CSV written by experiments/run_opt.py and coerce columns."""
+    if pd is None:
+        raise ImportError("pandas is required for reading logs but is not installed.")
     df = pd.read_csv(csv_path)
     # ensure numeric (they were formatted as strings for pretty printing)
     for c in ["f_best", "f_mean", "f_std", "gbest_f"]:
@@ -41,10 +50,18 @@ def plot_convergence(csv_path: str, outpath: str = None, ykey: str = "gbest_f"):
     Semilogy convergence curve for a single run.
     ykey in {"gbest_f", "f_best"} – gbest_f is global best so far (preferred).
     """
+    if plt is None or pd is None:
+        print("Skipping plot_convergence (matplotlib/pandas missing)")
+        return None
+        
     df = read_log(csv_path)
     fig = plt.figure()
     ax = plt.gca()
-    ax.semilogy(df["iter"], df[ykey])
+    vals = df[ykey]
+    if (vals <= 0).any():
+        ax.plot(df["iter"], vals)
+    else:
+        ax.semilogy(df["iter"], vals)
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Best objective value")
     ax.grid(True, which="both", linestyle=":")
@@ -81,6 +98,9 @@ def plot_convergence_overlay(csv_paths: List[str], outpath: str = None, ykey: st
     """
     Overlay multiple runs (e.g., different seeds) on one semilogy plot.
     """
+    if plt is None or pd is None:
+        return None
+
     fig = plt.figure()
     ax = plt.gca()
     for p in csv_paths:
@@ -102,6 +122,9 @@ def plot_final_boxplot(csv_paths: List[str], outpath: str = None, key: str = "gb
     """
     Boxplot of final best objective across runs/seeds.
     """
+    if plt is None or pd is None:
+        return None
+
     finals = []
     for p in csv_paths:
         df = read_log(p)
@@ -130,6 +153,9 @@ def plot_success_vs_budget(csv_paths: List[str], thresholds: List[float] = [1e-6
     Empirical success curve: for each evaluation count, share of runs that have reached threshold.
     Works best if runs share pop size so evals = iter*pop is roughly comparable.
     """
+    if plt is None or pd is None:
+        return None
+
     # Align by evals
     all_evals = set()
     series = []
@@ -170,6 +196,9 @@ def plot_swarm_2d(csv_path: str, positions_snapshots: List[np.ndarray], outpath:
     Optional (only if D=2): provide pre-captured positions (list per iter).
     This helper just plots trajectory clouds.
     """
+    if plt is None:
+        return None
+
     fig = plt.figure()
     ax = plt.gca()
     for pts in positions_snapshots:

@@ -4,11 +4,10 @@ import json
 import tempfile
 import numpy as np
 
-from utils.cst_airfoil import make_airfoil
-from utils.xfoil_runner import run_xfoil_single_alpha
+from utils.airfoil_analysis import analyze_airfoil
 
 # Where we store *only* the numerical cache (no geometry files)
-CACHE_FILE = os.path.join("data", "cache_xfoil.json")
+CACHE_FILE = os.path.join("data", "PartB", "cache_xfoil.json")
 
 # Robust cache loading: if file missing or corrupted, start fresh
 try:
@@ -24,24 +23,6 @@ def _key_from_vec(vec):
     return hashlib.md5(v.tobytes()).hexdigest()
 
 
-def _eval_coeffs(vec, Re: float, alpha: float):
-    """Compute (Cl, Cd, Cm) at given alpha, Re via XFOIL. Uses a temporary .dat."""
-    Au = vec[:3]
-    Al = vec[3:]
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".dat")
-    dat_path = tmp.name
-    tmp.close()
-    try:
-        make_airfoil(Au, Al, dat_path)
-        Cl, Cd, Cm = run_xfoil_single_alpha(dat_path, alpha=alpha, Re=Re)
-    finally:
-        try:
-            os.remove(dat_path)
-        except OSError:
-            pass
-    return Cl, Cd, Cm
-
-
 def airfoil_fitness(vec,
                     Re: float = 1e6,
                     alpha: float = 3.0,
@@ -50,10 +31,23 @@ def airfoil_fitness(vec,
                     return_all: bool = False):
     """
     Black-box aerodynamic objective for optimisation.
+    
+    MOO FORMULATION (Task B.2):
+    ---------------------------
+    Design Variables:
+      - 3 Upper Surface CST coefficients
+      - 3 Lower Surface CST coefficients
+      - Total: 6 variables (bounds usually [-0.2, 0.5])
+      
+    Objective Function (Scalarized Weighted Sum):
+      Minimize J = w1 * Cd - w2 * Cl + w3 * |Cm - Cm_target|
+      
+    Constraints:
+      - Geometric bounds are handled by the optimizer (box constraints).
+      - Aerodynamic feasibility (convergence) is handled by penalizing non-convergent solutions (J=10).
 
     vec: [Au0, Au1, Au2, Al0, Al1, Al2]
-    J = w1*Cd - w2*Cl + w3*|Cm - Cm_target|.
-
+    
     If return_all=True, returns (J, Cl, Cd, Cm).
     """
     key = _key_from_vec(vec)
@@ -64,14 +58,29 @@ def airfoil_fitness(vec,
             return J, rec["Cl"], rec["Cd"], rec["Cm"]
         return J
 
+    # vec is 6 elements: 3 upper, 3 lower
+    Au = vec[:3]
+    Al = vec[3:]
+    
     try:
-        Cl, Cd, Cm = _eval_coeffs(vec, Re=Re, alpha=alpha)
-        w1, w2, w3 = weights
-        J = w1 * Cd - w2 * Cl + w3 * abs(Cm - Cm_target)
+        Cl, Cd, Cm = analyze_airfoil(Au, Al, Re=Re, alpha=alpha)
+        
+        if Cl is None: # XFOIL failed
+             # Penalise non-convergent / bad geometries
+            Cl = Cd = Cm = None
+            J = 10.0
+        else:
+            w1, w2, w3 = weights
+            J = w1 * Cd - w2 * Cl + w3 * abs(Cm - Cm_target)
+            
     except Exception:
-        # Penalise non-convergent / bad geometries
         Cl = Cd = Cm = None
         J = 10.0
+
+    # Sanitize NaN values
+    if J is None or np.isnan(J):
+        J = 10.0
+        Cl = Cd = Cm = None
 
     # Update cache (numbers only)
     cache[key] = {"J": J, "Cl": Cl, "Cd": Cd, "Cm": Cm, "vec": list(vec)}

@@ -7,18 +7,18 @@
 
 
 # Set library name 
-PLTLIB = libPltDP.a
+PLTLIB = libPlt.a
 
 # Some fortrans need trailing underscores in C interface symbols (see Xwin.c)
 # This should work for most of the "unix" fortran compilers
 DEFINE = -DUNDERSCORE
 
-FC = ifort
+FC = gfortran
 CC  = gcc
-DP = -r8
+DP = 
 
-FFLAGS  = -O3 $(DP)
-CFLAGS  = -O3 $(DEFINE) -I/opt/local/include
+FFLAGS  = -O2 $(DP)
+CFLAGS  = -O2 $(DEFINE)
 AR = ar r
 RANLIB = ranlib 
 LINKLIB = -L/usr/X11/lib -lX11

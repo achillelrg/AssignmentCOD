@@ -1,19 +1,41 @@
-# Part B: Airfoil Optimisation
+# Part B: Airfoil Optimisation using XFOIL and PSO
 
-This module satisfies **Part B** of the assignment: Optimising an airfoil for aerodynamic performance using XFOIL.
+This module performs aerodynamic optimization of an airfoil using the CST parameterization method and XFOIL.
 
-## Prerequisites
-- **XFOIL** must be installed and accessible.
-- By default, the system looks for:
-  - `xfoil.exe` (on Windows)
-  - `xfoil` (on Linux/Mac)
-- Ensure the executable is in your system PATH or configure it in `utils/xfoil_runner.py`.
+## Setup
 
-## How to Run
+### Requirements
+- **XFOIL**: Ensure `xfoil` is installed and available in your PATH or at `Xfoil/xfoil`.
+- **Python**: Python 3.8+.
+- **Dependencies**: `numpy` is required. `pandas` and `matplotlib` are recommended for plotting but optional.
+
+### Installation (Optional)
+If you want to generate plots:
 ```bash
-python main_part_b.py
+sudo apt install python3-pandas python3-matplotlib
+# OR
+pip install pandas matplotlib --break-system-packages
 ```
 
-## Structure
-- Uses CST (Class-Shape-Transformation) method with 6 variables (3 upper, 3 lower).
-- Objective: Minimise Drag/Lift ratio with constraints (handled via penalty in the fitness function).
+## Usage
+
+Run the optimization from the project root:
+
+```bash
+# Run with default settings (200 evaluations)
+python3 -m experiments.run_airfoil --part B
+
+# Run with custom budget
+python3 -m experiments.run_airfoil --part B --evals 500 --pop 20
+```
+
+## Output
+Results are saved to `data/PartB/results/`.
+- `*.csv`: Optimization log (objective values per iteration).
+- `*_best.json`: Best design vector found.
+- `figures/`: Convergence plots and airfoil geometry comparisons (if plotting libraries are installed).
+
+## Implementation Details
+- **Optimization**: Particle Swarm Optimization (PSO).
+- **Evaluation**: Calls XFOIL for CL, CD, CM at specified conditions (Re=1e6, Alpha=3.0).
+- **Robustness**: Uses an improved XFOIL runner that parses stdout directly to avoid file I/O issues observed with `PACC` on some systems.

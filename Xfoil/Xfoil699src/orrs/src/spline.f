@@ -47,6 +47,10 @@ C     N        number of points           (input)       |
 C                                                       |
 C-------------------------------------------------------
       IF(N.GT.NMAX) STOP 'SPLINE: array overflow, increase NMAX'
+      IF(N.LT.2) THEN
+       XS(1) = 0.0
+       RETURN
+      ENDIF
 C     
       DO 1 I=2, N-1
         DSM = S(I) - S(I-1)

@@ -85,8 +85,8 @@ def main():
         if args.part:
             folder = os.path.join("data", f"Part{args.part}", "results")
         else:
-            bucket = "single_runs" if args.seed == 42 else "multi_runs"
-            folder = os.path.join("data", "results", bucket)
+            # Default to PartA for generic runs if not specified, or just "results"
+            folder = os.path.join("data", "PartA", "results")
             
         os.makedirs(folder, exist_ok=True)
         log_path = os.path.join(

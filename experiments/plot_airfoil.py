@@ -4,13 +4,22 @@ import json
 import os
 
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
+try:
+    import pandas as pd
+    from pandas.errors import EmptyDataError
+except ImportError:
+    pd = None
+    EmptyDataError = ValueError
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 from benchmarks.airfoil_xfoil import coeffs_at_alpha
-from utils.cst_airfoil import airfoil_coords, make_airfoil
+from utils.geometry import build_airfoil_coordinates as airfoil_coords
+from utils.geometry import write_dat
 from utils.xfoil_runner import run_xfoil_polar
-from pandas.errors import EmptyDataError
 
 BASE_FIG_DIR = os.path.join("data", "figures", "airfoil")
 
@@ -22,10 +31,14 @@ BASELINE_AL = [-0.1, -0.05, -0.02]
 def _ensure_dir(path: str):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
+def make_airfoil(Au, Al, filename, npts=201):
+    x, y = airfoil_coords(Au, Al, n_points=npts)
+    write_dat(x, y, filename, name="CST_AIRFOIL")
 
 
 
-def read_log(csv_path: str) -> pd.DataFrame:
+
+def read_log(csv_path: str):
     try:
         df = pd.read_csv(csv_path)
     except EmptyDataError:
@@ -39,10 +52,18 @@ def read_log(csv_path: str) -> pd.DataFrame:
 
 
 def plot_convergence(csv_path: str):
+    if plt is None or pd is None:
+        print("Skipping plot_convergence (missing libs)")
+        return None
+        
     df = read_log(csv_path)
     fig = plt.figure()
     ax = plt.gca()
-    ax.semilogy(df["iter"], df["gbest_f"])
+    vals = df["gbest_f"]
+    if (vals <= 0).any():
+        ax.plot(df["iter"], vals)
+    else:
+        ax.semilogy(df["iter"], vals)
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Best objective J")
     ax.grid(True, which="both", linestyle=":")
@@ -75,127 +96,135 @@ def _infer_output_dir(csv_path: str, subdir: str = "airfoil") -> str:
     else:
         return os.path.join("data", "figures", subdir)
 
+import numpy as np
+from utils.cst import cst_airfoil
+from utils.xfoil_runner import run_xfoil_polar
+from utils.geometry import write_dat
+
 def plot_geometry(best_vec, out_csv: str = None):
-    # Optimised geometry
-    Au_opt = best_vec[:3]
-    Al_opt = best_vec[3:]
-    x_opt, yu_opt, yl_opt = airfoil_coords(Au_opt, Al_opt, npts=201)
-
-    # Baseline geometry
-    x0, yu0, yl0 = airfoil_coords(BASELINE_AU, BASELINE_AL, npts=201)
-
-    fig = plt.figure()
-    ax = plt.gca()
-    ax.plot(x0, yu0, label="Baseline upper")
-    ax.plot(x0, yl0, label="Baseline lower")
-    ax.plot(x_opt, yu_opt, "--", label="Optimised upper")
-    ax.plot(x_opt, yl_opt, "--", label="Optimised lower")
+    if plt is None: return None
+    
+    # CST parameters
+    Au = best_vec[:3]
+    Al = best_vec[3:]
+    
+    # Generate coordinates for plotting (more points for smoothness)
+    # cst_airfoil returns (x, yu, x, yl) -> we need x, yu, yl
+    # Signature: cst_airfoil(n_points, coeffs_upper, coeffs_lower)
+    x, yu, xl, yl = cst_airfoil(200, Au, Al)
+    
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.plot(x, yu, 'b-', label='Upper')
+    ax.plot(x, yl, 'r-', label='Lower')
+    ax.fill_between(x, yu, yl, color='gray', alpha=0.1)
+    ax.axis('equal')
     ax.set_xlabel("x/c")
     ax.set_ylabel("y/c")
-    ax.set_title("Baseline vs optimised airfoil geometry")
+    ax.set_title("Optimized Airfoil Geometry")
     ax.grid(True, linestyle=":")
     ax.legend()
-
+    
     fig_dir = _infer_output_dir(out_csv, "geometry")
+    _ensure_dir(os.path.join(fig_dir, "dummy"))
     outpath = os.path.join(fig_dir, "geometry_comparison.png")
-    _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
 
-def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, outpath=None, out_csv: str = None):
-    import numpy as np
-    import matplotlib.pyplot as plt
+def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, out_csv: str = None, outpath=None):
+    if plt is None: return None
+    
+    labels = [f"Au{i}" for i in range(3)] + [f"Al{i}" for i in range(3)]
+    
+    fig, ax = plt.subplots(figsize=(8, 4))
+    bars = ax.bar(labels, best_vec, color=['b']*3 + ['r']*3)
+    ax.axhline(0, color='k', linewidth=0.8)
+    ax.set_ylabel("Coefficient Value")
+    ax.set_title("Optimized CST Parameters")
+    
+    # Add values on top
+    for rect in bars:
+        height = rect.get_height()
+        ax.text(rect.get_x() + rect.get_width()/2., 1.01*height,
+                f'{height:.2f}', ha='center', va='bottom' if height > 0 else 'top', fontsize=9)
 
-    # Baseline = zero CST vector (simple, reproducible baseline)
-    base_vec = np.zeros_like(best_vec)
-
-    # Get coefficients (may be None if XFOIL failed)
-    Clb, Cdb, Cmb = coeffs_at_alpha(base_vec, Re=Re, alpha=alpha)
-    Clo, Cdo, Cmo = coeffs_at_alpha(best_vec, Re=Re, alpha=alpha)
-
-    def _safe(vals):
-        out = []
-        for v in vals:
-            if v is None:
-                out.append(np.nan)
-            else:
-                out.append(float(v))
-        return out
-
-    labels    = ["Cl", "Cd", "Cm"]
-    baseline  = _safe([Clb, Cdb, Cmb])
-    optimised = _safe([Clo, Cdo, Cmo])
-
-    # Warn if anything is NaN
-    if any(np.isnan(baseline)) or any(np.isnan(optimised)):
-        print("Warning: some coefficients are unavailable (XFOIL failed). "
-              "Bars for NaN values will be empty.")
-
-    fig = plt.figure()
-    ax = plt.gca()
-    x = np.arange(len(labels))
-    width = 0.35
-    b1 = ax.bar(x - width/2, baseline,  width, label="Baseline")
-    b2 = ax.bar(x + width/2, optimised, width, label="Optimised")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Coefficient value")
-    ax.set_title(f"Aerodynamic coefficients at α={alpha}°")
-    ax.grid(True, axis="y", linestyle=":")
-    ax.legend()
-
-    # annotate NaNs
-    for bars in (b1, b2):
-        for rect in bars:
-            h = rect.get_height()
-            if np.isnan(h):
-                ax.text(rect.get_x() + rect.get_width()/2, 0.02, "n/a",
-                        ha="center", va="bottom", fontsize=9, rotation=0)
-
-    if outpath is None:
-        fig_dir = _infer_output_dir(out_csv, "coefficients")
-        outpath = os.path.join(fig_dir, "coeff_bar.png")
-    _ensure_dir(outpath)
+    fig_dir = _infer_output_dir(out_csv, "coefficients")
+    _ensure_dir(os.path.join(fig_dir, "dummy"))
+    outpath = os.path.join(fig_dir, "coeff_bar.png")
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
-
-
 
 def plot_polar(best_vec, Re=1e6, out_csv: str = None):
-    # Write .dat for baseline and optimised
-    os.makedirs(os.path.join("data", "airfoils"), exist_ok=True)
-    base_dat = os.path.join("data", "airfoils", "baseline.dat")
-    opt_dat = os.path.join("data", "airfoils", "optimised.dat")
-
-    make_airfoil(BASELINE_AU, BASELINE_AL, base_dat)
-    Au_opt = best_vec[:3]
-    Al_opt = best_vec[3:]
-    make_airfoil(Au_opt, Al_opt, opt_dat)
-
-    # XFOIL polars
-    a0, Cl0, Cd0, Cm0 = run_xfoil_polar(base_dat, a_start=0.0, a_end=6.0, a_step=0.5, Re=Re)
-    a1, Cl1, Cd1, Cm1 = run_xfoil_polar(opt_dat, a_start=0.0, a_end=6.0, a_step=0.5, Re=Re)
-
-    # Drag polar Cd vs Cl
-    fig = plt.figure()
-    ax = plt.gca()
-    ax.plot(Cd0, Cl0, "o-", label="Baseline")
-    ax.plot(Cd1, Cl1, "s--", label="Optimised")
-    ax.set_xlabel("$C_d$")
-    ax.set_ylabel("$C_l$")
-    ax.set_title("Drag polar comparison")
-    ax.grid(True, linestyle=":")
-    ax.legend()
-
+    if plt is None: return None
+    
+    # We need a .dat file to run polar
+    # Generate coordinates
+    # cst_airfoil(n_points, coeffs_upper, coeffs_lower)
+    x, yu, xl, yl = cst_airfoil(160, best_vec[:3], best_vec[3:])
+    
+    # Create temp dat file
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.dat', delete=False) as f:
+        tmp_dat = f.name
+    
+    # Convert to standard format (TE->LE->TE loop)
+    # Upper: TE(1) to LE(0)
+    # Lower: LE(0) to TE(1)
+    # cst_airfoil gives 0->1.
+    # Upper needs flip.
+    xu = x[::-1]
+    yup = yu[::-1]
+    xl = x[1:]
+    ylo = yl[1:]
+    
+    # Concat
+    xx = np.concatenate([xu, xl])
+    yy = np.concatenate([yup, ylo])
+    
+    write_dat(xx, yy, tmp_dat, name="OPT_AIRFOIL")
+    
+    # Run Polar
+    # Alpha range: -5 to 15 deg
+    print("Running polar analysis for plot...")
+    alphas, cls, cds, cms = run_xfoil_polar(tmp_dat, -5, 15, 1.0, Re=Re, n_iter=200)
+    
+    # Clean up dat
+    try:
+        os.remove(tmp_dat)
+    except:
+        pass
+        
+    if len(alphas) == 0:
+        print("Polar run failed or returned no data.")
+        return None
+        
+    # Plot Drag Polar (Cl vs Cd) and Cl/alpha
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Drag Polar
+    ax = axes[0]
+    ax.plot(cds, cls, 'o-')
+    ax.set_xlabel("Cd")
+    ax.set_ylabel("Cl")
+    ax.set_title(f"Drag Polar (Re={Re:.1e})")
+    ax.grid(True)
+    
+    # Cl/Alpha
+    ax = axes[1]
+    ax.plot(alphas, cls, 'o-')
+    ax.set_xlabel("Alpha (deg)")
+    ax.set_ylabel("Cl")
+    ax.set_title("Lift Curve")
+    ax.grid(True)
+    
     fig_dir = _infer_output_dir(out_csv, "polar")
+    _ensure_dir(os.path.join(fig_dir, "dummy"))
     outpath = os.path.join(fig_dir, "drag_polar.png")
-    _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
+
 
 
 def main():
@@ -228,16 +257,16 @@ def main():
     best_vec = np.array(best["x"], dtype=float)
 
     # 3) Geometry comparison
-    geom_png = plot_geometry(best_vec)
+    geom_png = plot_geometry(best_vec, out_csv=csv_path)
     print("Saved geometry comparison:", geom_png)
 
-    coeff_png = plot_coeff_bar(best_vec, Re=1e6, alpha=3.0)
+    coeff_png = plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, out_csv=csv_path)
     print("Saved coefficients bar chart:", coeff_png)
 
 
     # 4) Drag polar comparison
     try:
-        polar_png = plot_polar(best_vec, Re=1e6)
+        polar_png = plot_polar(best_vec, Re=1e6, out_csv=csv_path)
         print("Saved polar:", polar_png)
     except Exception as e:
         print("Warning: polar plot failed, skipping. Reason:", e)

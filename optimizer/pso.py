@@ -75,6 +75,7 @@ class PSO(Optimizer):
     def tell(self, fitness: List[float], constraints: Optional[List[np.ndarray]] = None):
         # 1) Update personal/global bests
         f_arr = np.asarray(fitness, dtype=float)
+        f_arr[np.isnan(f_arr)] = np.inf
         for k, i in enumerate(self._last_idx):
             fx = f_arr[k]
             p = self.swarm[i]
