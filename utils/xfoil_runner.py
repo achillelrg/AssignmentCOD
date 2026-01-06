@@ -31,7 +31,7 @@ else:
         _found = shutil.which("xfoil.exe") or shutil.which("xfoil")
     XFOIL_EXE = _found if _found else "xfoil"
 
-XFOIL_DIR = "."  # run in project folder
+XFOIL_DIR = "temp"  # run in temp folder
 
 # ---------------------------------------------------------------------------
 # LIBRARY-BASED RUNNER (Windows Friendly)
@@ -163,18 +163,25 @@ def _parse_xfoil_stdout(out: str) -> dict:
     return results_map
 
 def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
-    # Copy .dat locally
+    # Copy .dat locally to key workdir (temp)
     unique_id = uuid.uuid4().hex[:8]
-    local_dat = f"airfoil_{unique_id}.dat"
-    shutil.copy(dat_path, local_dat)
+    local_dat_name = f"airfoil_{unique_id}.dat"
+    local_dat_path = os.path.join(XFOIL_DIR, local_dat_name)
     
-    # Fix line endings
-    with open(local_dat, 'rb') as f: content = f.read().replace(b'\r\n', b'\n')
-    with open(local_dat, 'wb') as f: f.write(content)
+    # Ensure XFOIL_DIR exists
+    os.makedirs(XFOIL_DIR, exist_ok=True)
+    
+    shutil.copy(dat_path, local_dat_path)
+    
+    # Fix line endings (Force LF on Linux to prevent XFOIL issues)
+    with open(local_dat_path, 'rb') as f: content = f.read()
+    if os.name == 'posix':
+        content = content.replace(b'\r\n', b'\n')
+    with open(local_dat_path, 'wb') as f: f.write(content)
 
     script_lines = [
         "PLOP", "G", "",
-        f"LOAD {local_dat}",
+        f"LOAD {local_dat_name}",
         "PANE", "OPER",
         f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
         f"ALFA {alpha}", "", "QUIT"
@@ -184,7 +191,7 @@ def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
     rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
     
     # Cleanup
-    for p in [spath, local_dat]:
+    for p in [spath, local_dat_path]:
         if os.path.exists(p): os.remove(p)
 
     results = _parse_xfoil_stdout(out)
@@ -195,14 +202,20 @@ def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
 
 def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
     unique_id = uuid.uuid4().hex[:8]
-    local_dat = f"airfoil_{unique_id}.dat"
-    shutil.copy(dat_path, local_dat)
-    with open(local_dat, 'rb') as f: content = f.read().replace(b'\r\n', b'\n')
-    with open(local_dat, 'wb') as f: f.write(content)
+    local_dat_name = f"airfoil_{unique_id}.dat"
+    local_dat_path = os.path.join(XFOIL_DIR, local_dat_name)
+    
+    os.makedirs(XFOIL_DIR, exist_ok=True)
+    shutil.copy(dat_path, local_dat_path)
+    
+    with open(local_dat_path, 'rb') as f: content = f.read()
+    if os.name == 'posix':
+        content = content.replace(b'\r\n', b'\n')
+    with open(local_dat_path, 'wb') as f: f.write(content)
 
     script_lines = [
         "PLOP", "G", "",
-        f"LOAD {local_dat}",
+        f"LOAD {local_dat_name}",
         "PANE", "OPER",
         f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
         f"ASEQ {a_start} {a_end} {a_step}", "", "QUIT"
@@ -210,7 +223,7 @@ def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
     script = ("\r\n" if os.name == 'nt' else "\n").join(script_lines) + "\n"
     rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
     
-    for p in [spath, local_dat]:
+    for p in [spath, local_dat_path]:
         if os.path.exists(p): os.remove(p)
 
     results = _parse_xfoil_stdout(out)

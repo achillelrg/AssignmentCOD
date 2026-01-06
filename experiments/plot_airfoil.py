@@ -163,9 +163,13 @@ def plot_polar(best_vec, Re=1e6, out_csv: str = None):
     # cst_airfoil(n_points, coeffs_upper, coeffs_lower)
     x, yu, xl, yl = cst_airfoil(160, best_vec[:3], best_vec[3:])
     
-    # Create temp dat file
+    # Create temp dat file in project temp dir
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    temp_dir = os.path.join(root, "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    
     import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.dat', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.dat', dir=temp_dir, delete=False) as f:
         tmp_dat = f.name
     
     # Convert to standard format (TE->LE->TE loop)

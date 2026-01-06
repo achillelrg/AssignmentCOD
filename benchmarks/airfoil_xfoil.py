@@ -16,6 +16,11 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cache = {}
 
+def clear_cache():
+    """Reset the in-memory cache (useful if --clean was used)."""
+    global cache
+    cache = {}
+
 
 def _key_from_vec(vec, **kwargs):
     """Generate a stable hash key from the design vector and simulation params."""
@@ -89,10 +94,11 @@ def airfoil_fitness(vec,
         Cl = Cd = Cm = None
 
     # Update cache (numbers only)
-    cache[key] = {"J": J, "Cl": Cl, "Cd": Cd, "Cm": Cm, "vec": list(vec)}
-    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
+    # cache[key] = {"J": J, "Cl": Cl, "Cd": Cd, "Cm": Cm, "vec": list(vec)}
+    # NOTE: Disk cache disabled for parallel safety
+    # os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+    # with open(CACHE_FILE, "w") as f:
+    #     json.dump(cache, f, indent=2)
 
     if return_all:
         return J, Cl, Cd, Cm

@@ -23,47 +23,86 @@ def main():
     parser.add_argument("--jobs", type=int, default=1, help="Number of parallel workers")
     args = parser.parse_args()
 
-    # Runtime Estimation (Benchmark-based)
-    def estimate_runtime(n_points, n_iter, total_evals):
-        # Known benchmarks (approximate seconds per evaluation)
-        # 150 pts -> 0.1s
-        # 200 pts -> 0.75s
-        # 250 pts -> 4.0s
-        # Piecewise linear interpolation for 'n_points' factor
-        if n_points <= 150:
-            base_time = 0.1
-        elif n_points <= 200:
-            # Interpolate 150->200 (Range 50, Time 0.65)
-            ratio = (n_points - 150) / 50.0
-            base_time = 0.1 + ratio * (0.75 - 0.1)
-        elif n_points <= 250:
-             # Interpolate 200->250 (Range 50, Time 3.25)
-            ratio = (n_points - 200) / 50.0
-            base_time = 0.75 + ratio * (4.0 - 0.75)
-        else:
-            # Extrapolate harshly (N^2 or worse)
-            ratio = (n_points - 250) / 50.0
-            base_time = 4.0 + ratio * 8.0 # Guess
+    # Pre-run Cleanup (Clean temp folder)
+    def cleanup_temp():
+        temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp")
+        if os.path.exists(temp_dir):
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"Cleaned temp directory: {temp_dir}")
 
-        # Scale by Iterations (Baseline 100)
-        # XFOIL takes longer if it struggles, but let's assume linear scaling for simplicity
-        iter_factor = n_iter / 100.0
+    cleanup_temp() # Always clean temp/ at start
+
+    # Active Calibration Runtime Estimation
+    def estimate_runtime_active(n_points, n_iter, total_evals, n_jobs):
+        print("--- Benchmarking System Speed (Active) ---")
         
-        # Time per eval
-        t_per_eval = base_time * iter_factor
+        # 1. Create a "Heavy" valid airfoil (NACA 0012-ish CST)
+        # Random valid-ish vector
+        test_vec = [0.1, 0.15, 0.1,  -0.1, -0.1, -0.1] 
         
-        # Parallel speedup (ideal linear speedup approximation)
-        n_workers = max(1, args.jobs)
-        t_per_eval = t_per_eval / n_workers
+        # 2. Benchmark logic
+        import time
+        from multiprocessing import Pool
         
-        total_seconds = t_per_eval * total_evals
+        # We want to measure the throughput of the Pool, not just single eval
+        n_bench = max(n_jobs, 999) # Not used really
+        n_bench = n_jobs * 2 if n_jobs > 1 else 3
+        
+        # Create a small batch of tasks
+        tasks = [np.array(test_vec) for _ in range(n_bench)]
+        
+        from functools import partial
+        # We need a temporary fitness function just for benchmarking
+        # Use partial to pre-bind arguments
+        bench_fn = partial(airfoil_fitness, Re=1e6, alpha=3.0, n_points=n_points, n_iter=n_iter)
+
+        start = time.time()
+        
+        if n_jobs > 1:
+            # Benchmark Parallel Throughput
+            try:
+                with Pool(processes=n_jobs) as pool:
+                    _ = pool.map(bench_fn, tasks)
+            except Exception as e:
+                print(f"Benchmark failed (Pool error): {e}. Fallback to guess.")
+                return 600.0 # Random guess
+        else:
+            # Benchmark Serial
+            for t in tasks:
+                bench_fn(t)
+                
+        end = time.time()
+        duration = end - start
+        
+        # Speed per individual eval? No, we measured batch time.
+        # Throughput = n_bench / duration (evals per second)
+        throughput = n_bench / duration 
+        
+        print(f"Measured Throughput: {throughput:.2f} evals/sec (Benchmarked {n_bench} items in {duration:.2f}s)")
+        
+        total_seconds = total_evals / throughput
+        
+        # Correction Factor:
+        # Benchmarking uses "Clean" airfoils (fast).
+        # Optimization finds "Dirty" airfoils (slow, many iterations).
+        # We apply a factor of 5.0 to be safe.
+        total_seconds *= 5.0 
+        
         return total_seconds
 
-    predicted_seconds = estimate_runtime(args.points, args.iter, args.evals)
+    predicted_seconds = estimate_runtime_active(args.points, args.iter, args.evals, args.jobs)
     predicted_mins = predicted_seconds / 60.0
+    
+    def format_time_est(seconds):
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        return f"{h}h {m}m" if h else f"{m}m {s}s"
+
     print(f"--- Simulation Estimate ---")
     print(f"Points: {args.points} | Iter: {args.iter} | Evals: {args.evals} | Jobs: {args.jobs}")
-    print(f"Estimated Runtime: {predicted_mins:.1f} minutes ({predicted_seconds:.1f}s)")
+    print(f"Estimated Max Runtime: {format_time_est(predicted_seconds)} (Conservative)")
     print(f"---------------------------")
 
     # Handle cleaning request
@@ -74,6 +113,11 @@ def main():
              if os.path.exists(target_clean):
                  import shutil
                  shutil.rmtree(target_clean)
+             
+             # Also clear in-memory cache which was loaded at import time
+             import benchmarks.airfoil_xfoil
+             benchmarks.airfoil_xfoil.clear_cache()
+             print("In-memory cache cleared.")
         else:
              print("Warning: --clean flag ignored because --part was not specified.")
 

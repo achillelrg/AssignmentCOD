@@ -68,8 +68,10 @@ def analyze_airfoil(
     # 2. Write to temporary .dat file
     # unique name to avoid conflicts
     unique_name = f"cst_airfoil_{uuid.uuid4().hex[:8]}.dat"
-    # We write it to current dir to ensure XFOIL can load it easily, then clean up
-    dat_path = os.path.abspath(unique_name)
+    # Write to temp directory
+    temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    dat_path = os.path.join(temp_dir, unique_name)
     
     try:
         write_dat(x, y, dat_path, name="CST_AIRFOIL")

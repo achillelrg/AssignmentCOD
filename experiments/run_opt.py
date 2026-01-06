@@ -30,9 +30,17 @@ def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: 
         print(f"--- Parallel Mode Enabled: Using {n_jobs} workers ---")
         pool = multiprocessing.Pool(processes=n_jobs)
 
+    def format_time(seconds):
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h}h {m:02d}m {s:02d}s"
+        else:
+            return f"{m}m {s:02d}s"
+
     try:
         with open(log_path, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["iter","evals","f_best","f_mean","f_std","gbest_f"])
+            writer = csv.DictWriter(fh, fieldnames=["iter","evals","f_best","f_mean","f_std","gbest_f","x_best"])
             writer.writeheader()
 
             try:
@@ -50,6 +58,7 @@ def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: 
                     # Timing calculation
                     now = time.time()
                     elapsed = now - start_time
+                    elapsed_str = format_time(elapsed)
                     
                     st = opt.state()
                     writer.writerow({
@@ -59,6 +68,7 @@ def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: 
                         "f_mean": f"{st['f_mean']:.12e}",
                         "f_std": f"{st['f_std']:.12e}",
                         "gbest_f": f"{st['gbest_f']:.12e}",
+                        "x_best": str(list(st['gbest_x'])),
                     })
                     
                     # Dynamic ETA Calculation (Rolling Window)
@@ -78,12 +88,12 @@ def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: 
                              evals_remaining = max(0, eval_budget - evals_done)
                              if evals_remaining > 0:
                                  eta_seconds = evals_remaining / rate
-                                 eta_str = f"{eta_seconds/60:.1f}m"
+                                 eta_str = format_time(eta_seconds)
                              else:
-                                 eta_str = "0m"
+                                 eta_str = "0m 00s"
 
                     # Simple progress logging
-                    print(f"[Iter {st['iter']}] Evals: {st['evals_total']} | Best: {st['gbest_f']:.6e} | Mean: {st['f_mean']:.6e} | ETA: {eta_str}")
+                    print(f"[Iter {st['iter']}] Evals: {st['evals_total']} | Best: {st['gbest_f']:.6e} | Mean: {st['f_mean']:.6e} | Elapsed: {elapsed_str} | ETA: {eta_str}")
 
                     # stopping logic
                     if st["gbest_f"] < best_seen - 1e-16:

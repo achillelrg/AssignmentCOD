@@ -137,6 +137,7 @@ class PSO(Optimizer):
             "f_mean": self._iter_mean,
             "f_std": self._iter_std,
             "gbest_f": float(self.gbest_f),
+            "gbest_x": self.gbest_x.copy(),
             "trace_len": len(self._positions_trace),
         }
 
