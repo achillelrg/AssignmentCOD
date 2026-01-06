@@ -106,9 +106,17 @@ class PSO(Optimizer):
             p.x = project(p.x, self.bounds)
 
         # 3) iteration stats
-        self._iter_best = float(np.min(f_arr))
-        self._iter_mean = float(np.mean(f_arr))
-        self._iter_std = float(np.std(f_arr))
+        valid_mask = np.isfinite(f_arr)
+        if np.any(valid_mask):
+            valid_f = f_arr[valid_mask]
+            self._iter_best = float(np.min(valid_f))
+            self._iter_mean = float(np.mean(valid_f))
+            self._iter_std = float(np.std(valid_f))
+        else:
+             # If all failed (very rare/bad start)
+            self._iter_best = float(np.min(f_arr)) # likely inf
+            self._iter_mean = float(np.inf)
+            self._iter_std = 0.0
         self._evals_total += len(f_arr)
         self._iters += 1
 

@@ -2,6 +2,8 @@
 import argparse
 import csv
 import os
+import time
+import multiprocessing
 from datetime import datetime
 
 import numpy as np
@@ -11,40 +13,98 @@ from optimizer.pso import PSO
 from experiments.plotting import plot_swarm_2d, plot_convergence  # for optional 2D swarm plot and convergence
 
 
-def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: int = 200, log_path: str = "run.csv"):
+def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: int = 200, log_path: str = "run.csv", n_jobs: int = 1):
     best_seen = np.inf
     no_improve = 0
+    
+    # Timing initialization
+    start_time = time.time()
+    from collections import deque
+    window = deque(maxlen=8)
 
     os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
-    with open(log_path, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["iter","evals","f_best","f_mean","f_std","gbest_f"])
-        writer.writeheader()
+    
+    # Initialize Pool if parallel
+    pool = None
+    if n_jobs > 1:
+        print(f"--- Parallel Mode Enabled: Using {n_jobs} workers ---")
+        pool = multiprocessing.Pool(processes=n_jobs)
 
-        while True:
-            X = opt.ask()                     # list of np arrays
-            F = [f(x) for x in X]             # evaluate fitness
-            opt.tell(F)                       # inform optimiser
+    try:
+        with open(log_path, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=["iter","evals","f_best","f_mean","f_std","gbest_f"])
+            writer.writeheader()
 
-            st = opt.state()
-            writer.writerow({
-                "iter": st["iter"],
-                "evals": st["evals_total"],
-                "f_best": f"{st['f_best']:.12e}",
-                "f_mean": f"{st['f_mean']:.12e}",
-                "f_std": f"{st['f_std']:.12e}",
-                "gbest_f": f"{st['gbest_f']:.12e}",
-            })
+            try:
+                while True:
+                    X = opt.ask()                     # list of np arrays
+                    
+                    # Evaluate fitness (Parallel or Serial)
+                    if pool:
+                        F = pool.map(f, X)
+                    else:
+                        F = [f(x) for x in X]
+                    
+                    opt.tell(F)                       # inform optimiser
+                    
+                    # Timing calculation
+                    now = time.time()
+                    elapsed = now - start_time
+                    
+                    st = opt.state()
+                    writer.writerow({
+                        "iter": st["iter"],
+                        "evals": st["evals_total"],
+                        "f_best": f"{st['f_best']:.12e}",
+                        "f_mean": f"{st['f_mean']:.12e}",
+                        "f_std": f"{st['f_std']:.12e}",
+                        "gbest_f": f"{st['gbest_f']:.12e}",
+                    })
+                    
+                    # Dynamic ETA Calculation (Rolling Window)
+                    evals_done = st['evals_total']
+                    window.append((now, evals_done))
+                    
+                    eta_str = "..."
+                    if len(window) > 1:
+                         # Calculate rate based on window
+                         t_start, e_start = window[0]
+                         t_end, e_end = window[-1]
+                         dt = t_end - t_start
+                         de = e_end - e_start
+                         
+                         if dt > 0 and de > 0:
+                             rate = de / dt # evals per second (recent)
+                             evals_remaining = max(0, eval_budget - evals_done)
+                             if evals_remaining > 0:
+                                 eta_seconds = evals_remaining / rate
+                                 eta_str = f"{eta_seconds/60:.1f}m"
+                             else:
+                                 eta_str = "0m"
 
-            # stopping logic
-            if st["gbest_f"] < best_seen - 1e-16:
-                best_seen = st["gbest_f"]
-                no_improve = 0
-            else:
-                no_improve += 1
+                    # Simple progress logging
+                    print(f"[Iter {st['iter']}] Evals: {st['evals_total']} | Best: {st['gbest_f']:.6e} | Mean: {st['f_mean']:.6e} | ETA: {eta_str}")
 
-            if st["evals_total"] >= eval_budget: break
-            if st["gbest_f"] <= f_target: break
-            if no_improve >= stagnation: break
+                    # stopping logic
+                    if st["gbest_f"] < best_seen - 1e-16:
+                        best_seen = st["gbest_f"]
+                        no_improve = 0
+                    else:
+                        no_improve += 1
+
+                    if st["evals_total"] >= eval_budget: break
+                    if st["gbest_f"] <= f_target: break
+                    if no_improve >= stagnation: break
+
+            except KeyboardInterrupt:
+                print("\n!!! Interrupted by user. Stopping optimization early and saving current results... !!!")
+    
+    finally:
+        # Cleanup pool
+        if pool:
+            pool.close()
+            pool.join()
+
 
     return opt.best()
 
@@ -63,7 +123,20 @@ def main():
     parser.add_argument("--trace_every", type=int, default=0, help="Record 2D swarm positions every N iters (D=2 only)")
     parser.add_argument("--part", type=str, default=None, help="Assignment Part (A, B, or C) to organize outputs")
     parser.add_argument("--out", type=str, default=None, help="CSV log path (overrides default data/results/... location)")
+    parser.add_argument("--clean", action="store_true", help="Delete existing data folder for this Part before running")
     args = parser.parse_args()
+
+    # Handle cleaning request
+    if args.clean:
+        if args.part:
+             target_clean = os.path.join("data", f"Part{args.part}")
+             print(f"Cleaning {target_clean}...")
+             if os.path.exists(target_clean):
+                 import shutil
+                 shutil.rmtree(target_clean)
+        else:
+             print("Warning: --clean flag ignored because --part was not specified. Identifying correct folder is ambiguous.")
+
 
     bounds = [(-600.0, 600.0)] * args.D
     options = dict(
@@ -102,14 +175,19 @@ def main():
         trace = opt.positions_trace() if hasattr(opt, "positions_trace") else []
         if trace:
             # Save swarm plot in the SAME folder as the log, but with a suffix, or a 'figures' subfolder?
-            # User wants "clarity". Saving in data/PartA/figures seems good, or just data/PartA/.
-            # Let's keep it simple: data/figures/swarm is global.
-            # BUT if --part is set, maybe we want data/PartA/figures?
-            # For now, let's just stick to the requested structure: data/PartA/
+            # User wants "clarity".
             if args.part:
                 swarm_dir = os.path.join("data", f"Part{args.part}", "figures")
             else:
-                swarm_dir = os.path.join("data", "figures", "swarm")
+                # Try to deduce from log_path if possible, otherwise default
+                log_dir = os.path.dirname(log_path)
+                if "Part" in log_dir:
+                     # e.g. data/PartA/results -> data/PartA/figures
+                     base = os.path.dirname(log_dir)
+                     swarm_dir = os.path.join(base, "figures", "swarm")
+                else:
+                     # fallback
+                     swarm_dir = os.path.join("data", "PartB", "figures", "swarm")
 
             os.makedirs(swarm_dir, exist_ok=True)
             base = os.path.splitext(os.path.basename(log_path))[0]

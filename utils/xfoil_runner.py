@@ -117,15 +117,26 @@ def _run_lib_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
 # SUBPROCESS-BASED RUNNER (Linux Fallback)
 # ---------------------------------------------------------------------------
 
-def _run_xfoil_script(script: str, workdir: str = ".") -> Tuple[int, str, str, str]:
+def _run_xfoil_script(script: str, workdir: str = ".", timeout: int = 10) -> Tuple[int, str, str, str]:
     os.makedirs(workdir, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".inp", dir=workdir, encoding="ascii") as f:
         f.write(script)
         f.write("\n")
         script_path = f.name
-    with open(script_path, "r") as f_in:
-        proc = subprocess.run([XFOIL_EXE], stdin=f_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=workdir)
-    return proc.returncode, proc.stdout.decode(errors="ignore"), proc.stderr.decode(errors="ignore"), script_path
+    
+    try:
+        with open(script_path, "r") as f_in:
+            proc = subprocess.run(
+                [XFOIL_EXE], 
+                stdin=f_in, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                cwd=workdir,
+                timeout=timeout
+            )
+        return proc.returncode, proc.stdout.decode(errors="ignore"), proc.stderr.decode(errors="ignore"), script_path
+    except subprocess.TimeoutExpired:
+        return -1, "", "TimeoutExpired", script_path
 
 def _parse_xfoil_stdout(out: str) -> dict:
     results_map = {}

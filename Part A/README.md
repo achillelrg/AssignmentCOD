@@ -20,6 +20,7 @@ python main_part_a.py --pop 50 --evals 10000 --w 0.7 --c1 1.5 --c2 1.5
 ```
 
 - `--c2`: Social coefficient
+- `--clean`: Delete the existing `data/PartA` folder before starting the run (useful for fresh starts).
 
 ## Outputs
 After running the script, results are saved in `data/`:

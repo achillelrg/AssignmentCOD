@@ -6,6 +6,7 @@ import shutil
 import numpy as np
 
 from utils.geometry import build_airfoil_coordinates, write_dat
+from utils.cst import cst_airfoil
 from utils.xfoil_runner import run_xfoil_single_alpha, run_xfoil_polar
 
 def analyze_airfoil(
@@ -43,7 +44,25 @@ def analyze_airfoil(
         (CL, CD, CM) or (None, None, None) if failed.
     """
     
-    # 1. Create Airfoil Coordinates from CST
+    # 1. Validate Geometry (Prevent Crossing Surfaces)
+    # Check if Upper Surface is always above Lower Surface
+    # We use cst_airfoil directly to get the separated arrays
+    try:
+        _, yu, _, yl = cst_airfoil(n_points=n_points, coeffs_upper=coeffs_upper, coeffs_lower=coeffs_lower)
+        
+        # Tolerance for numerical noise, though usually exact crossing is bad.
+        # Check if any lower point is significantly above the corresponding upper point.
+        # We ignore the very leading/trailing edges which might be close/equal.
+        # Index 1:-1 skips endpoints.
+        if np.any(yl[1:-1] > yu[1:-1]):
+            # Invalid geometry: crossing surfaces
+            return None, None, None
+            
+    except ValueError:
+        # e.g. n_points too small
+        return None, None, None
+
+    # 2. Create Airfoil Coordinates from CST
     x, y = build_airfoil_coordinates(coeffs_upper, coeffs_lower, n_points=n_points)
     
     # 2. Write to temporary .dat file

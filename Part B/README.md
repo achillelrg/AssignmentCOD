@@ -26,7 +26,12 @@ Run the optimization from the project root:
 python3 -m experiments.run_airfoil --part B
 
 # Run with custom budget
+# Run with custom budget
 python3 -m experiments.run_airfoil --part B --evals 500 --pop 20
+
+# Start fresh (delete previous data)
+python3 -m experiments.run_airfoil --part B --clean
+
 ```
 
 ## Output

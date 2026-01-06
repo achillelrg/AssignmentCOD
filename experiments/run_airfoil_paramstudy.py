@@ -1,128 +1,128 @@
-from __future__ import annotations
-
+import argparse
 import csv
-from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Tuple, Dict
-
+import time
+import os
+import shutil
 import numpy as np
+from dataclasses import dataclass
+from typing import List, Dict
+from datetime import datetime
 
-from optimizers.pso import pso_optimize
-from utils.airfoil_problem import AirfoilConfig, evaluate_airfoil_theta
-from experiments.run_airfoil import make_bounds, surrogate_objective, USE_SURROGATE
-
+from optimizer.pso import PSO
+from benchmarks.airfoil_xfoil import airfoil_fitness
+from experiments.run_opt import optimize
 
 @dataclass
-class PSOConfig:
-    name: str
-    n_particles: int
-    n_iters: int
-    inertia: float
-    cognitive: float
-    social: float
+class StudyConfig:
+    n_points: int
+    n_iter: int
+    pop: int
+    evals: int
+    seed: int
 
+def run_study():
+    # Define the parameter grid
+    # We want to find a balance between speed and quality.
+    
+    # 1. Geometry Resolution
+    points_list = [150, 200, 250]
+    
+    # 2. XFOIL Iterations
+    iters_list = [100, 200]
+    
+    # 3. Population Size (Exploration power)
+    pop_list = [20, 40]
+    
+    # Fixed budget for fair comparison of efficiency per evaluation
+    FIXED_EVALS = 100
+    SEED = 42
 
-def get_configs() -> List[PSOConfig]:
-    """
-    A few PSO settings to compare for B.4.
-    Tune these if you like.
-    """
-    return [
-        PSOConfig("small_swarm_explore", n_particles=20, n_iters=60,
-                  inertia=0.9, cognitive=1.4, social=1.4),
-        PSOConfig("baseline", n_particles=40, n_iters=60,
-                  inertia=0.72, cognitive=1.4, social=1.4),
-        PSOConfig("large_swarm_exploit", n_particles=80, n_iters=60,
-                  inertia=0.6, cognitive=1.4, social=1.4),
-    ]
+    # Prepare output directory
+    base_dir = os.path.join("data", "PartB", "study")
+    os.makedirs(base_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join(base_dir, f"parameter_study_{timestamp}.csv")
 
+    print(f"Starting Parameter Study...")
+    print(f"Results will be saved to: {csv_path}")
 
-def make_eval_fn(cfg: AirfoilConfig):
-    """
-    Wrapper that chooses between surrogate and XFOIL evaluation
-    using the same logic as run_airfoil.py.
-    """
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["n_points", "n_iter", "pop", "evals", "time_sec", "best_fitness", "cl", "cd", "cm"])
 
-    if USE_SURROGATE:
-        def eval_fn(theta: np.ndarray) -> Tuple[float, dict]:
-            return surrogate_objective(theta)
-    else:
-        def eval_fn(theta: np.ndarray) -> Tuple[float, dict]:
-            return evaluate_airfoil_theta(theta, cfg)
+        total_runs = len(points_list) * len(iters_list) * len(pop_list)
+        run_idx = 0
 
-    return eval_fn
+        for pts in points_list:
+            for it in iters_list:
+                for pop in pop_list:
+                    run_idx += 1
+                    print(f"\n[{run_idx}/{total_runs}] Testing: Points={pts}, Iter={it}, Pop={pop}")
 
+                    # Setup Optimizer
+                    bounds = [(-0.2, 0.5)] * 6
+                    options = dict(pop=pop, w=0.7, c1=1.6, c2=1.6)
+                    opt = PSO(bounds=bounds, seed=SEED, options=options)
+
+                    # Wall-clock timing
+                    start_time = time.time()
+
+                    # Optimize
+                    # We need to inject the specific geometry parameters into the fitness function
+                    # Use a lambda to bind the current study parameters
+                    # NOTE: analyze_airfoil defaults are n_points=201, n_iter=200.
+                    # We need to override these.
+                    # airfoil_fitness calls analyze_airfoil but doesn't expose n_points/n_iter directly in signature?
+                    # Wait, look at benchmarks/airfoil_xfoil.py: airfoil_fitness signature is fixed.
+                    # We might need to modify airfoil_fitness or monkey-patch it, or pass via kw args if supported.
+                    # Looking at airfoil_fitness source... it calls analyze_airfoil.
+                    # It accepts *args/**kwargs? No.
+                    # We should probably modify airfoil_fitness to accept kwargs or use a wrapper that changes default behaviour.
+                    # OR, better: We modify utils/airfoil_analysis.py directly? No, unsafe.
+                    
+                    # Hack: We will wrap the inner call. 
+                    # Actually, let's just update airfoil_fitness signature in benchmarks/airfoil_xfoil.py to accept **kwargs
+                    # and pass them to analyze_airfoil. That is the cleanest way. 
+                    # But assuming I can't edit that file right now in this loop (I can, but let's see).
+                    
+                    # Let's assume for now I will Edit benchmarks/airfoil_xfoil.py to support overrides.
+                    # ... Wait, I am the agent, I can do that.
+                    
+                    # Define fitness function with current params
+                    def fitness_fn(v):
+                        return airfoil_fitness(
+                            np.array(v), 
+                            Re=1e6, 
+                            alpha=3.0, 
+                            n_points=pts, 
+                            n_iter=it
+                        )
+
+                    # Run optimization
+                    best = optimize(
+                        fitness_fn,
+                        opt,
+                        eval_budget=FIXED_EVALS,
+                        f_target=-1e9,
+                        log_path=os.path.join(base_dir, f"run_pts{pts}_it{it}_pop{pop}.csv")
+                    )
+
+                    duration = time.time() - start_time
+                    
+                    # Compute detailed coefficients for best result
+                    best_vec = np.array(best["x"], dtype=float)
+                    # We must pass same params to verify
+                    cl, cd, cm = airfoil_fitness(best_vec, Re=1e6, alpha=3.0, n_points=pts, n_iter=it, return_all=True)[1:]
+
+                    # Log
+                    print(f"   -> Time: {duration:.2f}s | Best f: {best['f']:.6f} | Cl/Cd: {cl}/{cd}")
+                    writer.writerow([pts, it, pop, FIXED_EVALS, f"{duration:.2f}", f"{best['f']:.6f}", cl, cd, cm])
+                    f.flush()
+
+    print(f"\nStudy complete. Results saved to {csv_path}")
 
 def main():
-    cfg = AirfoilConfig()
-    bounds = make_bounds()
-    eval_fn = make_eval_fn(cfg)
-
-    # Where to store multi-run study results
-    base_dir = Path("data/results/airfoil/multi")
-    base_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = base_dir / "airfoil_pso_paramstudy.csv"
-
-    # Prepare CSV
-    with summary_path.open("w", newline="") as f_csv:
-        writer = csv.writer(f_csv)
-        writer.writerow(
-            [
-                "config_name",
-                "seed",
-                "n_particles",
-                "n_iters",
-                "inertia",
-                "cognitive",
-                "social",
-                "f_best",
-                "success_rate",  # simple boolean flag for surrogate/XFOIL success
-            ]
-        )
-
-        for cfg_pso in get_configs():
-            print(f"\n=== Running config: {cfg_pso.name} ===")
-            for seed in [1, 2, 3, 4, 5]:
-                print(f"  - seed {seed}")
-
-                # Define objective for this run
-                def objective(theta: np.ndarray) -> float:
-                    f_val, info = eval_fn(theta)
-                    # you could store per-eval logs, but for B.4 a summary is enough
-                    return f_val
-
-                result: Dict = pso_optimize(
-                    objective,
-                    bounds,
-                    n_particles=cfg_pso.n_particles,
-                    n_iters=cfg_pso.n_iters,
-                    inertia=cfg_pso.inertia,
-                    cognitive=cfg_pso.cognitive,
-                    social=cfg_pso.social,
-                    seed=seed,
-                )
-
-                f_best = float(result["f_best"])
-                # For surrogate we assume success; for XFOIL you could
-                # propagate a success flag in eval_fn if you want.
-                success_rate = 1.0
-
-                writer.writerow(
-                    [
-                        cfg_pso.name,
-                        seed,
-                        cfg_pso.n_particles,
-                        cfg_pso.n_iters,
-                        cfg_pso.inertia,
-                        cfg_pso.cognitive,
-                        cfg_pso.social,
-                        f_best,
-                        success_rate,
-                    ]
-                )
-
-    print(f"\nParameter study summary written to: {summary_path}")
-
+    run_study()
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,7 @@ try:
 except ImportError:
     plt = None
 
-BASE_FIG_DIR = os.path.join("data", "figures")
+BASE_FIG_DIR = os.path.join("data", "PartB", "figures")
 
 
 def _ensure_dir(path: str):

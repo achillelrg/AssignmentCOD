@@ -17,18 +17,23 @@ except (FileNotFoundError, json.JSONDecodeError):
     cache = {}
 
 
-def _key_from_vec(vec):
-    """Generate a stable hash key from the design vector."""
+def _key_from_vec(vec, **kwargs):
+    """Generate a stable hash key from the design vector and simulation params."""
     v = np.asarray(vec, dtype=float)
-    return hashlib.md5(v.tobytes()).hexdigest()
+    # Include kwargs in hash to differentiate n_points/n_iter
+    param_str = json.dumps(kwargs, sort_keys=True)
+    payload = v.tobytes() + param_str.encode('utf-8')
+    return hashlib.md5(payload).hexdigest()
 
 
 def airfoil_fitness(vec,
                     Re: float = 1e6,
                     alpha: float = 3.0,
                     Cm_target: float = -0.05,
+
                     weights=(1.0, 2.0, 0.5),
-                    return_all: bool = False):
+                    return_all: bool = False,
+                    **kwargs):
     """
     Black-box aerodynamic objective for optimisation.
     
@@ -50,7 +55,7 @@ def airfoil_fitness(vec,
     
     If return_all=True, returns (J, Cl, Cd, Cm).
     """
-    key = _key_from_vec(vec)
+    key = _key_from_vec(vec, Re=Re, alpha=alpha, **kwargs)
     if key in cache:
         rec = cache[key]
         J = rec["J"]
@@ -63,7 +68,8 @@ def airfoil_fitness(vec,
     Al = vec[3:]
     
     try:
-        Cl, Cd, Cm = analyze_airfoil(Au, Al, Re=Re, alpha=alpha)
+        # Pass kwargs (e.g. n_points, n_iter) to analyze_airfoil
+        Cl, Cd, Cm = analyze_airfoil(Au, Al, Re=Re, alpha=alpha, **kwargs)
         
         if Cl is None: # XFOIL failed
              # Penalise non-convergent / bad geometries
@@ -93,7 +99,7 @@ def airfoil_fitness(vec,
     return J
 
 
-def coeffs_at_alpha(vec, Re: float = 1e6, alpha: float = 3.0):
+def coeffs_at_alpha(vec, Re: float = 1e6, alpha: float = 3.0, **kwargs):
     """Convenience: return only (Cl, Cd, Cm) using same cache path."""
-    J, Cl, Cd, Cm = airfoil_fitness(vec, Re=Re, alpha=alpha, return_all=True)
+    J, Cl, Cd, Cm = airfoil_fitness(vec, Re=Re, alpha=alpha, return_all=True, **kwargs)
     return Cl, Cd, Cm
