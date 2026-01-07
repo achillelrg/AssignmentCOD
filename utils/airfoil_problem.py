@@ -8,7 +8,7 @@ import numpy as np
 
 from utils.cst import cst_airfoil  # only if you also need it elsewhere
 from utils.geometry import build_airfoil_coordinates, write_dat
-from utils.xfoil_runner import run_single_alpha, XFoilError
+from utils.xfoil_runner import run_xfoil_single_alpha, run_xfoil_polar
 
 
 @dataclass

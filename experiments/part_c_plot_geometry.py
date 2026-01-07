@@ -3,52 +3,64 @@ import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from experiments import plot_airfoil
+import sys
+import argparse
+
+sys.path.append(os.getcwd())
+from utils.cst import cst_airfoil
+
+def load_design(json_path):
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    if "x_opt" in data: return np.array(data["x_opt"]) # surrogate format
+    if "x" in data: return np.array(data["x"]) # best.json format
+    return None
 
 def main():
-    print("--- Part C: Plotting Surrogate Design ---")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ref", required=True, help="Path to Part B reference JSON")
+    parser.add_argument("--opt", default="data/PartC/surrogate_comparison.json", help="Path to Surrogate Opt JSON")
+    args = parser.parse_args()
     
-    # 1. Load result
-    json_path = os.path.join("data", "PartC", "surrogate", "surrogate_results.json")
-    if not os.path.exists(json_path):
-        print(f"Error: {json_path} not found.")
+    x_ref = load_design(args.ref)
+    x_opt = load_design(args.opt)
+    
+    if x_ref is None or x_opt is None:
+        print("Error loading designs")
         return
+
+    # Generate Coords
+    def get_coords(x):
+        n_vars = len(x)
+        coeffs_u = x[:n_vars//2]
+        coeffs_l = x[n_vars//2:]
+        xu, yu, xl, yl = cst_airfoil(200, coeffs_u, coeffs_l)
+        return xu, yu, xl, yl
         
-    with open(json_path, "r") as f:
-        data = json.load(f)
-        
-    x = np.array(data["x_opt_surro"])
+    xu1, yu1, xl1, yl1 = get_coords(x_ref)
+    xu2, yu2, xl2, yl2 = get_coords(x_opt)
     
-    # 2. Setup output dir
-    out_dir = os.path.join("data", "PartC", "figures")
-    os.makedirs(out_dir, exist_ok=True)
+    plt.figure(figsize=(10, 6))
     
-    # 3. Plot Geometry
-    # We cheat the plot_geometry function which expects a "csv_path" to infer output dir.
-    # We will manually set the output path inside the function call or wrapper?
-    # Actually plot_geometry saves to "figures/airfoil/geometry_final.png" inferred from CSV.
-    # Let's just copy the logic or subclass.
-    # Easier: Just use utils.geometry and matplotlib directly here.
+    # Plot Ref
+    plt.plot(xu1, yu1, 'k--', label='Part B Best (PSO)', linewidth=1.5)
+    plt.plot(xl1, yl1, 'k--', linewidth=1.5)
     
-    from utils.cst import cst_airfoil
+    # Plot Opt
+    plt.plot(xu2, yu2, 'r-', label='Surrogate Opt (C.4)', linewidth=2)
+    plt.plot(xl2, yl2, 'r-', linewidth=2)
     
-    # Generate coords
-    coords_x, coords_yu, _, coords_yl = cst_airfoil(200, x[:3], x[3:])
-    
-    plt.figure(figsize=(10, 3))
-    plt.plot(coords_x, coords_yu, 'b-', label='Upper')
-    plt.plot(coords_x, coords_yl, 'r-', label='Lower')
     plt.axis('equal')
-    plt.grid(True, alpha=0.3)
+    plt.grid(True, linestyle=':', alpha=0.6)
     plt.legend()
-    plt.title(f"Surrogate Optimized Airfoil (Predicted Fitness: {data['f_pred']:.2f})")
+    plt.title("Airfoil Shape Comparison: Direct vs Surrogate Optimization")
     plt.xlabel("x/c")
     plt.ylabel("y/c")
     
-    # Save
-    save_path = os.path.join(out_dir, "surrogate_geometry.png")
-    plt.savefig(save_path, dpi=150)
-    print(f"Saved geometry to {save_path}")
+    out_path = "data/PartC/figures/c4_geometry_comparison.png"
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=300)
+    print(f"Saved comparison plot to {out_path}")
 
 if __name__ == "__main__":
     main()

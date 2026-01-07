@@ -125,8 +125,9 @@ def plot_geometry(best_vec, out_csv: str = None):
     ax.legend()
     
     fig_dir = _infer_output_dir(out_csv, "geometry")
-    _ensure_dir(os.path.join(fig_dir, "dummy"))
-    outpath = os.path.join(fig_dir, "geometry_comparison.png")
+    base = os.path.splitext(os.path.basename(out_csv))[0]
+    outpath = os.path.join(fig_dir, f"{base}_geometry.png")
+    _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
@@ -149,8 +150,9 @@ def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, out_csv: str = None, outpath=Non
                 f'{height:.2f}', ha='center', va='bottom' if height > 0 else 'top', fontsize=9)
 
     fig_dir = _infer_output_dir(out_csv, "coefficients")
-    _ensure_dir(os.path.join(fig_dir, "dummy"))
-    outpath = os.path.join(fig_dir, "coeff_bar.png")
+    base = os.path.splitext(os.path.basename(out_csv))[0]
+    outpath = os.path.join(fig_dir, f"{base}_coeff_bar.png")
+    _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath
@@ -223,8 +225,9 @@ def plot_polar(best_vec, Re=1e6, out_csv: str = None):
     ax.grid(True)
     
     fig_dir = _infer_output_dir(out_csv, "polar")
-    _ensure_dir(os.path.join(fig_dir, "dummy"))
-    outpath = os.path.join(fig_dir, "drag_polar.png")
+    base = os.path.splitext(os.path.basename(out_csv))[0]
+    outpath = os.path.join(fig_dir, f"{base}_polar.png")
+    _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outpath

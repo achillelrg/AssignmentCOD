@@ -109,6 +109,7 @@ class GA(Optimizer):
             "iter": self.iter,
             "evals_total": self.evals_total,
             "gbest_f": self.gbest_f,
+            "gbest_x": self.gbest_x.copy() if self.gbest_x is not None else None,
             "f_best": np.min(self.fitness) if self.iter > 0 else np.nan,
             "f_mean": np.mean(self.fitness) if self.iter > 0 else np.nan,
             "f_std": np.std(self.fitness) if self.iter > 0 else np.nan,

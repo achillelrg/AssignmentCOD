@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environments
+venv/
+env/
+.env
+
+# Temporary
+temp/
+*.log
+*.dat
+
+# IDE
+.vscode/
+.idea/
+
+# Large Data (Optional, but recommended to avoid 10k files)
+# keeping data/ for now as it contains results, but maybe ignore huge CSVs if needed?
+# data/PartC/training_data.csv # This is 2000 lines, small enough.

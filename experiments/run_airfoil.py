@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.getcwd())
 
 from optimizer.pso import PSO
+from optimizer.ga import GA
 from benchmarks.airfoil_xfoil import airfoil_fitness
 from experiments.run_opt import optimize   # reuse Part A harness
 
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--clean", action="store_true", help="Delete existing data folder for this Part before running")
     parser.add_argument("--jobs", type=int, default=1, help="Number of parallel workers")
+    parser.add_argument("--solver", type=str, default="pso", choices=["pso", "ga"], help="Optimisation algorithm")
     args = parser.parse_args()
 
     # Pre-run Cleanup (Clean temp folder)
@@ -81,7 +83,12 @@ def main():
         
         # Speed per individual eval? No, we measured batch time.
         # Throughput = n_bench / duration (evals per second)
-        throughput = n_bench / duration 
+        if n_jobs > 1:
+            # Observed empirical speed for this machine is ~2-3 evals/sec per job
+            # The benchmark often overestimates. We clamp it.
+            throughput = min(n_bench / duration, 4.0 * n_jobs)
+        else:
+            throughput = n_bench / duration 
         
         print(f"Measured Throughput: {throughput:.2f} evals/sec (Benchmarked {n_bench} items in {duration:.2f}s)")
         
@@ -126,22 +133,33 @@ def main():
 
     # 6 CST coefficients: 3 upper, 3 lower
     bounds = [(-0.2, 0.5)] * 6
-    options = dict(pop=args.pop, w=0.7, c1=1.6, c2=1.6)
-
+    
     seed = args.seed
     eval_budget = args.evals
 
-    opt = PSO(bounds=bounds, seed=seed, options=options)
+    if args.solver == "pso":
+        # Standard PSO Defaults
+        options = dict(pop=args.pop, w=0.7, c1=1.6, c2=1.6)
+        opt = PSO(bounds=bounds, seed=seed, options=options)
+    elif args.solver == "ga":
+        # GA Defaults
+        options = dict(pop=args.pop, mutation_rate=0.1, crossover_rate=0.9)
+        opt = GA(bounds=bounds, seed=seed, options=options)
+    else:
+        raise ValueError(f"Unknown solver: {args.solver}")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if args.part:
-        folder = os.path.join("data", f"Part{args.part}", "results")
+        # Structured: data/PartB/pso/results
+        folder = os.path.join("data", f"Part{args.part}", args.solver, "results")
     else:
-        folder = os.path.join("data", "results", "airfoil")
+        # Fallback
+        folder = os.path.join("data", "results", "airfoil", args.solver)
         
     os.makedirs(folder, exist_ok=True)
-    out_csv = os.path.join(folder, f"airfoil_opt_seed{seed}_{stamp}.csv")
+    # detailed naming: airfoil_{solver}_pop{pop}_evals{evals}_seed{seed}_{stamp}.csv
+    out_csv = os.path.join(folder, f"airfoil_{args.solver}_pop{args.pop}_evals{args.evals}_seed{seed}_{stamp}.csv")
     
     from functools import partial
     fitness_fn = partial(airfoil_fitness, Re=1e6, alpha=3.0, n_points=args.points, n_iter=args.iter)
