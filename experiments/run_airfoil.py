@@ -3,9 +3,12 @@ from datetime import datetime
 import json
 import numpy as np
 
+import sys
+sys.path.append(os.getcwd())
+
 from optimizer.pso import PSO
 from benchmarks.airfoil_xfoil import airfoil_fitness
-from .run_opt import optimize   # reuse Part A harness
+from experiments.run_opt import optimize   # reuse Part A harness
 
 
 import argparse
