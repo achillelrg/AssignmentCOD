@@ -83,19 +83,25 @@ def evaluate_row(args):
     if os.path.exists(dat_path):
         os.remove(dat_path)
         
-    # Check failure and physical realism
+    # Penalty Values for Failure
+    PENALTY_CL = 0.0   # Loss of lift
+    PENALTY_CD = 0.5   # Huge drag wall
+    PENALTY_CM = 0.0
+    is_valid = True
+    
     if cl is None:
-        return None
-        
-    # Filter non-physical results (e.g. huge drag, unrealistic lift)
-    if cd > 0.05 or abs(cl) > 2.0 or abs(cm) > 0.5:
-        # Also reject infinity
-        return None
+        # XFOIL Crashed / Non-convergence
+        cl, cd, cm = PENALTY_CL, PENALTY_CD, PENALTY_CM
+        is_valid = False
+    elif cd > 0.5 or abs(cl) > 2.5:
+        # Physical Divergence (garbage values)
+        cl, cd, cm = PENALTY_CL, PENALTY_CD, PENALTY_CM
+        is_valid = False
         
     return {
         "x0": x[0], "x1": x[1], "x2": x[2], "x3": x[3], "x4": x[4], "x5": x[5],
         "cl": cl, "cd": cd, "cm": cm,
-        "valid": True
+        "valid": is_valid
     }
 
 def main():
@@ -185,6 +191,15 @@ def main():
     print(f"Requested: {args.samples}")
     print(f"Successful XFOIL: {len(df)} ({len(df)/args.samples*100:.1f}%)")
     print(f"Saved to {out_path}")
+    
+    # Auto-Run Inspection Plot
+    print("\n--- Generating Data Inspection Plot ---")
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "experiments/inspect_data.py"], check=True)
+        print("Saved data/PartC/figures/cd_dist.png")
+    except Exception as e:
+        print(f"Failed to plot data: {e}")
 
 if __name__ == "__main__":
     main()

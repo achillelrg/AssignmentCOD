@@ -37,6 +37,12 @@ This document records the technical journey, challenges encountered, and logic a
     -   The optimizer found a "Super Geometry" ($C_l=1.4$) that ultimately failed verification.
     -   **Diagnosis:** By filtering out failed runs during training, we created a model that verified "Aggressive = Good" but didn't know "Aggressive = Stall".
     -   **Lesson:** Robust ML for physics requires training on *failures* (with penalties) to define the feasible boundary.
+5.  **The Penalty Method (Solution):**
+    -   **Approach:** Modified the data generator to catch XFOIL crashes and assign "Wall" values ($C_d = 0.5, C_l = 0.0$).
+    -   **Validation:** 
+        -   The Parity Plots (`c3_parity_cd.png`) showed distinct **Vertical Walls** at the penalty values. This confirmed the model successfully learned to distinguish "Flyable" (Low Drag) vs "Penalty" (High Drag) regions.
+        -   The Data Histogram (`cd_dist.png`) revealed a **Bimodal Distribution**: a cluster of efficient flights near $C_d \approx 0.01$ and a cluster of failures at $C_d = 0.5$.
+    -   **Outcome:** The optimizer was forced to navigate the "Safe Zone", converging on a high-lift design ($C_l \approx 1.19$) that was **verified** to work in XFOIL.
 
 ## 📂 Project Structure
 -   `experiments/`: Runners for each part (`part_c_surrogate.py`, `part_c_opt_surrogate.py`).

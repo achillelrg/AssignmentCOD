@@ -19,10 +19,8 @@ def load_data(csv_path="data/PartC/training_data.csv"):
     df = pd.read_csv(csv_path)
     
     # Filter valid
-    # In data_gen, we only saved valid ones?
-    # No, we only added to list if valid.
-    # But let's be safe.
-    df = df[df["valid"] == True]
+    # We NOW include 'invalid' runs (failed XFOIL) because they have Penalty values.
+    # df = df[df["valid"] == True]
     df = df.dropna(subset=["cl", "cd", "cm"])
     
     # Filter physical bounds (approx)
@@ -57,7 +55,7 @@ def train_surrogate(X, y, name="Cl"):
     kernel = C(1.0) * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(noise_level=1e-5)
     
     print("Fitting model...")
-    gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, normalize_y=False)
+    gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=1, normalize_y=False)
     
     # Split
     X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=42)

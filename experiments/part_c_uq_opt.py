@@ -24,8 +24,14 @@ def main():
     with open(args.json, 'r') as f:
         data = json.load(f)
     print(f"Loaded design from {args.json}")
-    x_opt = np.array(data["x"])
     
+    if "x" in data:
+        x_opt = np.array(data["x"])
+    elif "x_opt" in data:
+        x_opt = np.array(data["x_opt"])
+    else:
+        raise KeyError("Could not find design vector ('x' or 'x_opt') in loaded JSON.")
+
     # 2. Generate Airfoil Coordinates (Standard Re/Mach)
     # We need to run xfoil for varying alpha
     # But evaluating theta (CST) -> .dat file creation -> run xfoil
@@ -91,7 +97,7 @@ def main():
         ax.set_ylabel("Frequency")
         # Add stats box
         mu, sigma = np.mean(metrics[i]), np.std(metrics[i])
-        stats = f"$\mu={mu:.4f}$\n$\sigma={sigma:.4f}$"
+        stats = r"$\mu={:.4f}$" "\n" r"$\sigma={:.4f}$".format(mu, sigma)
         ax.annotate(stats, xy=(0.05, 0.95), xycoords='axes fraction', 
                     verticalalignment='top', bbox=dict(boxstyle="round", fc="white"))
                     

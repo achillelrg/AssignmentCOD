@@ -48,10 +48,26 @@ def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: 
                     X = opt.ask()                     # list of np arrays
                     
                     # Evaluate fitness (Parallel or Serial)
+                    import sys
+                    current_iter = opt.state()['iter'] + 1
+                    total_pop = len(X)
+                    
+                    # Evaluate fitness (Parallel or Serial)
+                    F = []
                     if pool:
-                        F = pool.map(f, X)
+                        # Use imap to show progress within the generation
+                        for i, res in enumerate(pool.imap(f, X), 1):
+                            F.append(res)
+                            sys.stdout.write(f"\r[Iter {current_iter}] Evaluating: {i}/{total_pop}")
+                            sys.stdout.flush()
                     else:
-                        F = [f(x) for x in X]
+                        for i, x in enumerate(X, 1):
+                            F.append(f(x))
+                            sys.stdout.write(f"\r[Iter {current_iter}] Evaluating: {i}/{total_pop}")
+                            sys.stdout.flush()
+                            
+                    # Clear the progress line (overwrite with spaces then CR)
+                    sys.stdout.write("\r" + " "*50 + "\r")
                     
                     opt.tell(F)                       # inform optimiser
                     
