@@ -101,7 +101,7 @@ from utils.cst import cst_airfoil
 from utils.xfoil_runner import run_xfoil_polar
 from utils.geometry import write_dat
 
-def plot_geometry(best_vec, out_csv: str = None):
+def plot_geometry(best_vec, out_csv: str = None, alpha: float = 3.0):
     if plt is None: return None
     
     # CST parameters
@@ -109,18 +109,72 @@ def plot_geometry(best_vec, out_csv: str = None):
     Al = best_vec[3:]
     
     # Generate coordinates for plotting (more points for smoothness)
-    # cst_airfoil returns (x, yu, x, yl) -> we need x, yu, yl
-    # Signature: cst_airfoil(n_points, coeffs_upper, coeffs_lower)
     x, yu, xl, yl = cst_airfoil(200, Au, Al)
     
-    fig, ax = plt.subplots(figsize=(10, 3))
-    ax.plot(x, yu, 'b-', label='Upper')
-    ax.plot(x, yl, 'r-', label='Lower')
-    ax.fill_between(x, yu, yl, color='gray', alpha=0.1)
+    # Rotation for "Wind Tunnel View" (Wind Horizontal)
+    # To generate Lift (Alph=3 deg) with L->R wind, the Nose should be Higher than the Tail (relative to horizontal).
+    # This exposes the bottom surface to the wind.
+    # Current coords: LE at (0,0), TE at (1,0).
+    # We want TE to be LOWER than LE (Visual Nose Up).
+    # So we rotate by -Alpha.
+    
+    rad = np.radians(-alpha) # Negative to pitch Nose Up (Tail Down)
+    c, s = np.cos(rad), np.sin(rad)
+    R = np.array([[c, -s], [s, c]])
+    
+    # Rotate Upper Surface
+    # Stack (N, 2)
+    pts_u = np.column_stack([x, yu])
+    pts_u_rot = pts_u @ R.T
+    xu_rot, yu_rot = pts_u_rot[:, 0], pts_u_rot[:, 1]
+    
+    # Rotate Lower Surface
+    pts_l = np.column_stack([x, yl])
+    pts_l_rot = pts_l @ R.T
+    xl_rot, yl_rot = pts_l_rot[:, 0], pts_l_rot[:, 1]
+    
+    fig, ax = plt.subplots(figsize=(10, 4)) # Taller for rotation
+    
+    # Plot Airfoil
+    ax.plot(xu_rot, yu_rot, 'b-', label='Upper', linewidth=2)
+    ax.plot(xl_rot, yl_rot, 'r-', label='Lower', linewidth=2)
+    ax.fill_between(xu_rot, yu_rot, yl_rot, color='gray', alpha=0.3, zorder=10)
+    
+    # Explicit Labels for Nose/Tail
+    ax.text(xu_rot[0], yu_rot[0]-0.08, "Nose (LE)", color='black', fontweight='bold', ha='center', va='top')
+    ax.text(xl_rot[-1]+0.05, yl_rot[-1], "Tail (TE)", color='black', fontweight='bold', ha='left')
+    
+    # Draw Wind Streamlines (Horizontal)
+    x_min, x_max = -0.2, 1.2
+    y_min, y_max = -0.4, 0.4
+    
+    # 50 Lines
+    y_lines = np.linspace(y_min, y_max, 50)
+    
+    first_line = True
+    for y_line in y_lines:
+        # Label only the first line to avoid legend duplication
+        lbl = 'Wind Streamlines' if first_line else None
+        
+        ax.plot([x_min, x_max], [y_line, y_line], color='deepskyblue', alpha=0.15, lw=1.5, zorder=0, label=lbl)
+        first_line = False
+
+    # Add Velocity Vector Label
+    ax.arrow(-0.15, 0.0, 0.1, 0.0, head_width=0.02, color='deepskyblue', lw=2, zorder=20)
+    ax.text(-0.15, 0.03, r"$V_{\infty}$", color='deepskyblue', fontsize=12, fontweight='bold')
+
     ax.axis('equal')
+    ax.set_xlim(-0.2, 1.2)
+    ax.set_ylim(-0.35, 0.35)
     ax.set_xlabel("x/c")
     ax.set_ylabel("y/c")
-    ax.set_title("Optimized Airfoil Geometry")
+    ax.set_title(f"Airfoil Geometry (Rotated to Wind Frame, $\\alpha={alpha}^\circ$)")
+    
+    # Add Alpha Text Box
+    text_str = f"$\\alpha = {alpha}^\circ$"
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=12,
+            verticalalignment='top', bbox=props)
     ax.grid(True, linestyle=":")
     ax.legend()
     
