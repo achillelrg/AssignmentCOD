@@ -1,3 +1,15 @@
+"""
+Part C Data Generation: Latin Hypercube Sampling (LHS).
+
+This script generates a training dataset for the Surrogate Model (Part C).
+It explores the Design Space using LHS to ensure good coverage.
+
+Workflow:
+1.  **Sampling:** Generates candidate CST vectors using `scipy.stats.qmc`.
+2.  **Filtering:** Performs geometric checks (thickness) to discard invalid shapes quickly.
+3.  **Evaluation:** Runs XFOIL in parallel (`multiprocessing`) to obtain aerodynamic coefficients.
+4.  **Logging:** Saves valid (and optionally penalized) samples to CSV.
+"""
 
 import os
 import sys
@@ -16,8 +28,14 @@ from utils.xfoil_runner import run_xfoil_single_alpha
 
 def evaluate_row(args):
     """
-    Worker function for parallel evaluation.
-    args: (index, x_vec, Re, alpha, points, iter)
+    Worker function for parallel XFOIL evaluation.
+    
+    Args:
+        args (Tuple): (index, x_vec, Re, alpha, points, iter).
+        
+    Returns:
+        dict: A dictionary containing design vars (x0..xn) and targets (cl, cd, cm).
+              Includes a 'valid' flag if execution failed.
     """
     idx, x, Re, alpha, n_points, n_iter = args
     
@@ -36,53 +54,25 @@ def evaluate_row(args):
     # It duplicates code but is safer for established codebase.
     
     import uuid
-    from utils.cst import cst_airfoil
-    from utils.geometry import write_dat
+    from utils.airfoil_analysis import analyze_airfoil
     
     # CST
-    # x is 6 vars: 3 upper, 3 lower
     n_vars = len(x)
     n_cst = n_vars // 2
     coeffs_u = x[:n_cst]
     coeffs_l = x[n_cst:]
     
-    # Generate
-    xu, yu, xl, yl = cst_airfoil(n_points, coeffs_u, coeffs_l, dz_te=0.0)
+    # Delegate to the robust analysis function used in Part B
+    # It handles geometry generation, checks, temp file management, and XFOIL runs.
+    cl, cd, cm = analyze_airfoil(
+        coeffs_upper=coeffs_u,
+        coeffs_lower=coeffs_l,
+        alpha=alpha,
+        Re=Re,
+        n_iter=n_iter,
+        n_points=n_points
+    )
     
-    # Merge
-    # Upper flip + Lower (standard selig format logic)
-    # Top surface: TE -> LE
-    # Bot surface: LE -> TE
-    top_x, top_y = np.flip(xu), np.flip(yu)
-    bot_x, bot_y = xl[1:], yl[1:] # skip LE duplicate
-    
-    # Geometric Check: Upper surface must be above Lower surface
-    # We check interior points (exclude LE and TE where they meet)
-    # yl and yu are arrays of size N.
-    if np.any(yl[1:-1] >= yu[1:-1]):
-        # Invalid geometry (crossing)
-        return None
-        
-    coords_x = np.concatenate([top_x, bot_x])
-    coords_y = np.concatenate([top_y, bot_y])
-    
-    # Save Temp
-    unique_id = uuid.uuid4().hex[:8]
-    dat_path = f"temp/lhs_{idx}_{unique_id}.dat"
-    os.makedirs("temp", exist_ok=True)
-    
-    with open(dat_path, "w") as f:
-        f.write(f"LHS_Sample_{idx}\n")
-        for cx, cy in zip(coords_x, coords_y):
-            f.write(f" {cx:.6f}  {cy:.6f}\n")
-            
-    # Run XFOIL
-    cl, cd, cm = run_xfoil_single_alpha(dat_path, alpha=alpha, Re=Re, n_iter=n_iter)
-    
-    # Cleanup
-    if os.path.exists(dat_path):
-        os.remove(dat_path)
-        
     # Penalty Values for Failure
     PENALTY_CL = 0.0   # Loss of lift
     PENALTY_CD = 0.5   # Huge drag wall
@@ -97,6 +87,12 @@ def evaluate_row(args):
         # Physical Divergence (garbage values)
         cl, cd, cm = PENALTY_CL, PENALTY_CD, PENALTY_CM
         is_valid = False
+        
+    return {
+        "x0": x[0], "x1": x[1], "x2": x[2], "x3": x[3], "x4": x[4], "x5": x[5],
+        "cl": cl, "cd": cd, "cm": cm,
+        "valid": is_valid
+    }
         
     return {
         "x0": x[0], "x1": x[1], "x2": x[2], "x3": x[3], "x4": x[4], "x5": x[5],
@@ -135,7 +131,7 @@ def main():
             coeffs_l = x[n_cst:]
             
             # Fast check
-            xu, yu, xl, yl = cst_airfoil(200, coeffs_u, coeffs_l, dz_te=0.0)
+            xu, yu, xl, yl = cst_airfoil(100, coeffs_u, coeffs_l, dz_te=0.0)
             
             # Check crossing
             if np.any(yl[1:-1] >= yu[1:-1]):
@@ -152,30 +148,48 @@ def main():
     
     # 2. Evaluate Parallel
     tasks = []
+    # Reduces n_points to 160 for safety
     for i, x in enumerate(valid_configs):
-        tasks.append((i, x, 1e6, 3.0, 200, 100))
+        tasks.append((i, x, 1e6, 3.0, 160, 100))
         
     results = []
     
     import time
     start_time = time.time()
     
-    with Pool(processes=args.jobs) as pool:
-        print("Running XFOIL evaluations...")
+    # Conditional Pool for Debugging
+    if args.jobs > 1:
+        # Parallel
+        pool_ctx = Pool(processes=args.jobs)
+        iterator = pool_ctx.imap(evaluate_row, tasks)
+    else:
+        # Serial (No Pool)
+        pool_ctx = None
+        iterator = map(evaluate_row, tasks)
+
+    print("Running XFOIL evaluations...")
         
-        # Use imap to track progress
-        mapped_res = []
-        total = len(tasks)
-        for i, res in enumerate(pool.imap(evaluate_row, tasks), 1):
-            mapped_res.append(res)
+    # Use imap (or map) to track progress
+    mapped_res = []
+    total = len(tasks)
+    
+    for i, res in enumerate(iterator, 1):
+        mapped_res.append(res)
+        
+        if i % 10 == 0 or i == total:
+            elapsed = time.time() - start_time
+            avg_t = elapsed / i
+            eta = (total - i) * avg_t
+            valid_cnt = len([r for r in mapped_res if r is not None and r['valid']])
+            sys.stdout.write(f"\r  > Processed {i}/{total} ({i/total*100:.1f}%) | ETA: {eta/60:.1f} min | Found: {valid_cnt} valid")
+            sys.stdout.flush()
             
-            if i % 5 == 0 or i == total:
-                elapsed = time.time() - start_time
-                avg_t = elapsed / i
-                eta = (total - i) * avg_t
-                sys.stdout.write(f"\r  > Processed {i}/{total} ({i/total*100:.1f}%) | ETA: {eta/60:.1f} min | Found: {len([r for r in mapped_res if r is not None])} valid")
-                sys.stdout.flush()
-        print() # Newline after loop
+            # Partial Save (Safety) - every 500 samples
+            if valid_cnt > 0 and i % 500 == 0:
+                temp_df = pd.DataFrame([r for r in mapped_res if r is not None])
+                temp_df.to_csv(f"data/PartC/training_data_partial_{i}.csv", index=False)
+                
+    print() # Newline after loop
         
     # Filter None
     valid_res = [r for r in mapped_res if r is not None]

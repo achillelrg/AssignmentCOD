@@ -1,3 +1,13 @@
+"""
+General Plotting Utilities (Part A).
+
+This module contains statistical plotting functions used to analyze optimizer stability.
+
+Key Plots:
+1.  **Convergence Overlay:** Stacks multiple runs (seeds) to visualize variance.
+2.  **Robustness Boxplot:** Shows the distribution of final fitness values.
+3.  **Success Rate:** Empirical probability of solving the problem vs budget.
+"""
 import os
 import glob
 import math
@@ -70,25 +80,40 @@ def plot_convergence(csv_path: str, outpath: str = None, ykey: str = "gbest_f"):
     ax.set_title(title)
 
     if outpath is None:
-        # Instead of hardcoded BASE_FIG_DIR, try to save near the CSV if possible, or use a default.
-        # Current behavior: hardcoded BASE_FIG_DIR = data/figures.
-        # New behavior: if csv_path is in data/PartA/, we might want data/PartA/figures/convergence?
-        # Let's check where the CSV is.
-        csv_dir = os.path.dirname(csv_path)
-        # simplistic heuristic: if "Part" is in the path, use that structure
-        if "Part" in csv_dir:
-            # e.g. data/PartA/results or data/PartA
-            if os.path.basename(csv_dir) == "results":
-                base_dir = os.path.dirname(csv_dir) # up one level -> data/PartA
+        # Simplificated logic: Look for "PartX" in path
+        # Expected structure: data/PartX/results/foo.csv -> data/PartX/figures/foo_conv.png
+        
+        csv_dir = os.path.abspath(os.path.dirname(csv_path))
+        
+        # Try to find "PartX" in the path parts
+        parts = csv_dir.split(os.sep)
+        part_name = None
+        for p in parts:
+            if p.startswith("Part"):
+                part_name = p
+                break
+        
+        if part_name:
+            # We found PartA, PartB etc.
+            # Find the root of valid data folder (parent of PartX)
+            # This is tricky if absolute. Easier strategy:
+            # If csv is in .../PartA/results, go up to PartA, then down to figures.
+            
+            if "results" in parts:
+                # Assuming .../PartA/results
+                # Go up one level from 'results'
+                base_dir = os.path.dirname(csv_dir)
             else:
+                # Assuming .../PartA
                 base_dir = csv_dir
+                
             fig_dir = os.path.join(base_dir, "figures", "convergence")
         else:
-            # fallback to global
+            # Fallback to default
             fig_dir = os.path.join(BASE_FIG_DIR, "convergence")
-            
-        outpath = os.path.join(fig_dir, f"{meta['base']}_{ykey}_conv.png")
-        
+
+        outpath = os.path.join(fig_dir, f"{meta['base']}_conv.png")
+
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -105,14 +130,29 @@ def plot_convergence_overlay(csv_paths: List[str], outpath: str = None, ykey: st
     ax = plt.gca()
     for p in csv_paths:
         df = read_log(p)
-        ax.semilogy(df["iter"], df[ykey], alpha=0.7)
+        label = parse_meta_from_filename(p).get("base", "run")
+        ax.semilogy(df["iter"], df[ykey], alpha=0.7, label=label)
+    
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Best objective value")
     ax.grid(True, which="both", linestyle=":")
-    ax.set_title("Convergence overlay (multiple seeds)")
+    ax.set_title("Convergence overlay")
+    # ax.legend() # messy if too many
 
     if outpath is None:
-        outpath = os.path.join(BASE_FIG_DIR, "overlays", "convergence_overlay.png")
+        # Default to first CSV's location
+        if csv_paths:
+             # Re-use logic from above? Or just hardcode for simplicity in this overlay
+             # For overlays, we usually want them in the parent figures folder
+             p1 = os.path.abspath(os.path.dirname(csv_paths[0]))
+             if "results" in p1: 
+                 base = os.path.dirname(p1) 
+                 outpath = os.path.join(base, "figures", "convergence_overlay.png")
+             else:
+                 outpath = os.path.join(p1, "figures", "convergence_overlay.png")
+        else:
+             outpath = os.path.join(BASE_FIG_DIR, "overlays", "convergence_overlay.png")
+
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -141,7 +181,16 @@ def plot_final_boxplot(csv_paths: List[str], outpath: str = None, key: str = "gb
     ax.grid(True, axis="y", linestyle=":")
 
     if outpath is None:
-        outpath = os.path.join(BASE_FIG_DIR, "overlays", "final_boxplot.png")
+        if csv_paths:
+             p1 = os.path.abspath(os.path.dirname(csv_paths[0]))
+             if "results" in p1: 
+                 base = os.path.dirname(p1) 
+                 outpath = os.path.join(base, "figures", "final_boxplot.png")
+             else:
+                 outpath = os.path.join(p1, "figures", "final_boxplot.png")
+        else:
+            outpath = os.path.join(BASE_FIG_DIR, "overlays", "final_boxplot.png")
+
     _ensure_dir(outpath)
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)

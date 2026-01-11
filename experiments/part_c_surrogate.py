@@ -1,3 +1,17 @@
+"""
+Part C Surrogate Training.
+
+This script builds the Machine Learning models (Gaussian Processes) used to approximate XFOIL.
+
+Models Trained:
+1.  **Cl (Lift):** Standard GP with Matern Kernel.
+2.  **Cd (Drag):** GP trained on **Log10(Cd)** to capture orders of magnitude.
+3.  **Cm (Moment):** Standard GP.
+
+Outputs:
+- `.pkl` files: Serialized models (used by `part_c_opt_surrogate.py`).
+- Parity Plots: Visual validation of model accuracy.
+"""
 
 import os
 import glob
@@ -31,6 +45,22 @@ def load_data(csv_path="data/PartC/training_data.csv"):
     return df
 
 def train_surrogate(X, y, name="Cl"):
+    """
+    Train a Gaussian Process Regressor for a specific target.
+
+    Features:
+    - **Scaling:** Standardizes inputs (X) and outputs (y).
+    - **Log Transform:** Automatically applies Log10 if target is 'Cd'.
+    - **Validation:** Splits 80/20 and reports RMSE/R2 on hold-out set.
+
+    Args:
+        X (np.ndarray): Input design vectors.
+        y (np.ndarray): Target values.
+        name (str): Target name ('Cl', 'Cd', 'Cm').
+
+    Returns:
+        tuple: (model, scaler_X, scaler_y, (rmse, r2))
+    """
     print(f"\n{'='*40}")
     print(f"--- Training GP for {name.upper()} ---")
     

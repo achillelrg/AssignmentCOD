@@ -92,7 +92,23 @@ def evaluate_airfoil_theta(theta: Iterable[float], cfg: AirfoilConfig):
     dat_path = run_dir / "candidate.dat"
 
     # --- Quick geometric sanity check to avoid degenerate shapes ---
+    # --- Quick geometric sanity check to avoid degenerate shapes ---
     a_u, a_l = theta_to_cst(theta)
+
+    # 1. Intersection Check (New strict constraint)
+    # We explicitly check if Lower Surface crosses Upper Surface
+    try:
+        _, yu, _, yl = cst_airfoil(n_points=cfg.n_points, coeffs_upper=a_u, coeffs_lower=a_l)
+        # Tolerance for numerical noise. Index 1:-1 skips LE/TE which are naturally close/equal.
+        if np.any(yl[1:-1] >= yu[1:-1]):
+            return cfg.w_fail, {
+                "success": False,
+                "error": "Geometric Intersection (Lower > Upper)",
+                "cl": np.nan, "cd": np.nan, "cm": np.nan,
+            }
+    except ValueError:
+        pass # Fallback to standard check if CST fails
+
     x_tmp, y_tmp = build_airfoil_coordinates(
         coeffs_upper=a_u,
         coeffs_lower=a_l,

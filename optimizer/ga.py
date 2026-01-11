@@ -39,6 +39,18 @@ class GA(Optimizer):
         self._state_phase = "ask" 
 
     def ask(self) -> List[np.ndarray]:
+        """
+        Generate the next population of candidate solutions.
+
+        Logic:
+        1.  **Elitism:** Carry over the top `elite_frac` of the current population unchanged.
+        2.  **Selection:** Use Tournament Selection (size 3) to pick parents.
+        3.  **Crossover:** Apply Arithmetic Crossover with probability `cross_rate`.
+        4.  **Mutation:** Apply Gaussian Mutation to new offspring with probability `mut_rate`.
+
+        Returns:
+            List[np.ndarray]: A list of design vectors (numpy arrays) to be evaluated.
+        """
         if self._state_phase != "ask":
              raise RuntimeError("Call tell() before ask()")
              
@@ -82,6 +94,13 @@ class GA(Optimizer):
         return list(self.X)
     
     def tell(self, fitness: List[float], constraints=None):
+        """
+        Update the population with the evaluated fitness scores.
+
+        Args:
+            fitness (List[float]): List of scalar fitness values (lower is better).
+            constraints: Not used in this implementation.
+        """
         if self._state_phase != "tell":
              raise RuntimeError("Call ask() before tell()")
              
@@ -102,9 +121,11 @@ class GA(Optimizer):
         self._state_phase = "ask"
 
     def best(self):
+        """Return the Global Best (gbest) solution found so far."""
         return {"x": self.gbest_x, "f": self.gbest_f}
 
     def state(self) -> Dict:
+        """Return a dictionary of the optimizer's current statistics."""
         return {
             "iter": self.iter,
             "evals_total": self.evals_total,
@@ -116,6 +137,11 @@ class GA(Optimizer):
         }
 
     def _tournament(self, sorted_indices) -> np.ndarray:
+        """
+        Select a parent using Tournament Selection.
+        
+        Randomly picks 3 individuals and returns the one with the best (lowest) fitness.
+        """
         # Tournament of size 3
         competitors = self.rng.choice(self.pop_size, 3, replace=False)
         # Since we have sorted_indices, we can find the best by finding the one with lowest rank (index in sorted)
@@ -125,6 +151,12 @@ class GA(Optimizer):
         return self.X[best_idx].copy()
 
     def _crossover(self, p1, p2):
+        """
+        Perform Arithmetic Crossover between two parents.
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Two updated offspring.
+        """
         # Arithmetic crossover
         alpha = self.rng.random()
         c1 = alpha * p1 + (1 - alpha) * p2
@@ -132,6 +164,12 @@ class GA(Optimizer):
         return c1, c2
 
     def _mutate(self, x):
+        """
+        Apply Gaussian Mutation to a design vector in-place.
+        
+        Adds noise N(0, mutation_scale) to genes with prob `mutation_rate`.
+        Projects result back to bounds.
+        """
         # Gaussian mutation
         mask = self.rng.random(self.D) < self.mut_rate
         if np.any(mask):

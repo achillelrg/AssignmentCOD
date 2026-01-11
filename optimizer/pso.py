@@ -20,6 +20,20 @@ class PSO(Optimizer):
     - optional 2D trajectory tracing (trace_every > 0 and D == 2)
     """
     def __init__(self, bounds: Bounds, seed: int = 0, options: Optional[Dict] = None):
+        """
+        Initialize the Particle Swarm Optimizer.
+
+        Args:
+            bounds (Bounds): List of (min, max) tuples for each dimension.
+            seed (int): Random seed for reproducibility.
+            options (Dict, optional): Configuration dictionary.
+                - 'pop' (int): Swarm size (default 40).
+                - 'w' (float): Inertia weight (default 0.72).
+                - 'c1' (float): Cognitive coefficient (default 1.6).
+                - 'c2' (float): Social coefficient (default 1.6).
+                - 'vmax_frac' (float): Velocity limit as fraction of range (default 0.2).
+                - 'topology' (str): 'gbest' (Global) or 'lbest' (Ring) (default 'gbest').
+        """
         super().__init__(bounds, seed, options)
         opt = self.options
 
@@ -61,6 +75,7 @@ class PSO(Optimizer):
         self._iters = 0
 
     def _local_best_position(self, i: int) -> np.ndarray:
+        """Find the local best position for particle i in a Ring Topology."""
         # ring topology with k neighbors on each side
         k = self.k_neighbors
         idxs = [(i + d) % self.pop for d in range(-k, k + 1)]
@@ -68,11 +83,34 @@ class PSO(Optimizer):
         return best.pbest_x
 
     def ask(self) -> List[np.ndarray]:
+        """
+        Return the current positions of all particles to be evaluated.
+
+        Returns:
+            List[np.ndarray]: List of design vectors of size (pop, D).
+        """
         # Evaluate current positions
         self._last_idx = list(range(self.pop))
         return [self.swarm[i].x.copy() for i in self._last_idx]
 
     def tell(self, fitness: List[float], constraints: Optional[List[np.ndarray]] = None):
+        """
+        Update the swarm based on the evaluated fitness of the current candidates.
+
+        This method performs the core PSO logic:
+        1.  **Update Bests:** Compares new fitness vs Personal Best (pbest) and Global Best (gbest).
+        2.  **Update Velocity:** v = w*v + c1*r1*(pbest-x) + c2*r2*(gbest-x).
+        3.  **Clamp Velocity:** Limits v to [-vmax, +vmax] to ensure stability.
+        4.  **Update Position:** x = x + v, constrained to bounds.
+
+        Args:
+            fitness (List[float]): A list of scalar fitness values (J) for the current population.
+                                   Lower is better (minimization).
+            constraints: Ignored in this unconstrained implementation (handled via penalty).
+
+        Returns:
+            None: Updates the internal state (`self.swarm`) in-place.
+        """
         # 1) Update personal/global bests
         f_arr = np.asarray(fitness, dtype=float)
         f_arr[np.isnan(f_arr)] = np.inf
@@ -126,9 +164,11 @@ class PSO(Optimizer):
             self._positions_trace.append(pts)
 
     def best(self):
+        """Return the Global Best (gbest) solution found so far."""
         return {"x": self.gbest_x.copy(), "f": float(self.gbest_f)}
 
     def state(self) -> Dict:
+        """Return a dictionary of the optimizer's current statistics."""
         # ---- UPDATED: expose trace length for convenience ----
         return {
             "iter": self._iters,

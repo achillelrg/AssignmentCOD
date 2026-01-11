@@ -1,3 +1,18 @@
+"""
+Part C.4 Optimization: Deterministic Search on Surrogate.
+
+This script leverages the speed of the trained GP models to perform a 
+high-resolution search using standard deterministic algorithms (Nelder-Mead).
+
+Advantages:
+- **Speed:** 1000s of iterations in seconds (vs hours with XFOIL).
+- **Smoothness:** GP models provide a smooth gradient (or quasi-gradient).
+
+Workflow:
+1.  **Load:** Deserializes the 3 GP models (Cl, Cd, Cm).
+2.  **Optimize:** Runs `scipy.optimize.minimize` on the `objective` function.
+3.  **Verify:** Re-runs the *optimal design vector* in actual XFOIL to check for hallucination.
+"""
 
 import os
 import sys
@@ -56,6 +71,15 @@ def predict(models, sX, sY, x_in):
     return preds
 
 def objective(x, models, sX, sY):
+    """
+    Surrogate Objective Function.
+
+    Evaluates the 'virtual' fitness of a design vector using the GP models.
+    Matches the Part B fitness definition (Max [Cl/Cd] or Weighted Sum).
+
+    Returns:
+        float: Fitness value (Lower is better). 1e9 if constraints violated.
+    """
     # Bounds Check
     if np.any(x < -0.2) or np.any(x > 0.5):
         return 1e9

@@ -1,4 +1,14 @@
-# experiments/run_opt.py
+"""
+Generic Optimization Driver.
+
+This script runs a single optimization session on a benchmark function (default: Griewank).
+It is primarily used by `run_part_a.py` for statistical validation.
+
+Features:
+- **Parallelization:** Supports multi-core evaluation via `multiprocessing.Pool`.
+- **Logging:** streams Real-Time stats to CSV.
+- **Stopping Criteria:** Budget, Target Fitness, or Stagnation.
+"""
 import argparse
 import csv
 import os
@@ -14,6 +24,22 @@ from experiments.plotting import plot_swarm_2d, plot_convergence  # for optional
 
 
 def optimize(f, opt: PSO, eval_budget: int, f_target: float = 1e-6, stagnation: int = 200, log_path: str = "run.csv", n_jobs: int = 1):
+    """
+    Execute the main optimization loop.
+
+    Args:
+        f (callable): Objective function (must accept numpy array).
+        opt (Optimizer): The initialized optimizer instance (PSO/GA).
+        eval_budget (int): Maximum number of function evaluations.
+        f_target (float): Target fitness to stop early (if reached).
+        stagnation (int): Stop if no improvement after N iterations.
+        log_path (str): Path to save the CSV log.
+        n_jobs (int): Number of parallel workers (1 = Serial).
+
+    Returns:
+        dict: The best solution found {'x': ..., 'f': ...}.
+    """
+    best_seen = np.inf
     best_seen = np.inf
     no_improve = 0
     

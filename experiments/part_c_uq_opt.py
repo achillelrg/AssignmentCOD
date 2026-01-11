@@ -1,3 +1,16 @@
+"""
+CLI Tool for Uncertainty Quantification.
+
+A command-line version of the robustness test, allowing analysis of *any* design JSON
+(not just the hardcoded 'best' one).
+
+Usage:
+    python experiments/part_c_uq_opt.py --json data/PartB/results/xyz_best.json --samples 50
+
+Features:
+- **Flexible Input:** Check robustness of any intermediate solution.
+- **Configurable:** Custom mean/std for Alpha.
+"""
 
 import os
 import json

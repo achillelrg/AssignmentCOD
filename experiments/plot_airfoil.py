@@ -1,3 +1,23 @@
+"""
+Part B Plotting Library.
+
+This module provides specialized plotting functions for Airfoil Optimisation results.
+
+Key Plots:
+1.  **Convergence:** Optimization Fitness (J) vs Iterations.
+2.  **Geometry:** Visualizes the optimized Airfoil shape, including:
+    - CST Construction.
+    - Rotation to Wind Frame (Alpha angle).
+    - Performance Annotation (Cl, Cd, L/D).
+3.  **Coefficients:** Bar chart of the optimized CST variables.
+4.  **Polars:** Drag Polar (Cl vs Cd) and Lift Curve (Cl vs Alpha).
+
+Dependencies:
+    - matplotlib
+    - pandas
+    - utils.geometry (CST)
+    - utils.xfoil_runner (for Polars)
+"""
 import argparse
 import glob
 import json
@@ -52,6 +72,15 @@ def read_log(csv_path: str):
 
 
 def plot_convergence(csv_path: str):
+    """
+    Plot the optimization convergence history (Best Fitness vs Iterations).
+    
+    Args:
+        csv_path (str): Path to the run log CSV.
+        
+    Returns:
+        str: Path to the saved image file.
+    """
     if plt is None or pd is None:
         print("Skipping plot_convergence (missing libs)")
         return None
@@ -102,6 +131,22 @@ from utils.xfoil_runner import run_xfoil_polar
 from utils.geometry import write_dat
 
 def plot_geometry(best_vec, out_csv: str = None, alpha: float = 3.0):
+    """
+    Plot the optimized airfoil geometry, rotated to the wind frame.
+
+    Visualizes:
+    - Upper/Lower surfaces.
+    - Wind streamlines (Horizontal).
+    - Performance Metrics (Cl, Cd, L/D) if importable.
+    
+    Args:
+        best_vec (np.ndarray): Array of CST coefficients [Au, Al].
+        out_csv (str): Path to source CSV (used for naming output file).
+        alpha (float): Angle of Attack (deg) for rotation and annotation.
+        
+    Returns:
+        str: Path to saved image.
+    """
     if plt is None: return None
     
     # CST parameters
@@ -175,8 +220,38 @@ def plot_geometry(best_vec, out_csv: str = None, alpha: float = 3.0):
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=12,
             verticalalignment='top', bbox=props)
+            
+    # --- Performance Annotation ---
+    # Convert 'best_vec' to Cl, Cd, Cm
+    # We need to import airfoil_fitness safely
+    try:
+        from benchmarks.airfoil_xfoil import airfoil_fitness
+        # best_vec is numpy array, convert to list
+        J_val, Cl_val, Cd_val, Cm_val = airfoil_fitness(best_vec, return_all=True)
+        
+        # Format string
+        if Cl_val is not None:
+             perf_str = (
+                 f"Performance:\n"
+                 f"Cl: {Cl_val:.4f}\n"
+                 f"Cd: {Cd_val:.5f}\n"
+                 f"L/D: {Cl_val/Cd_val:.1f}\n"
+                 f"Cm: {Cm_val:.4f}"
+             )
+             
+             # Place box in top-right or bottom-left? 
+             # Top-left is taken by Alpha. Let's try Top-Right or Bottom-Right.
+             # Top-Right is clean.
+             perf_props = dict(boxstyle='round', facecolor='lightcyan', alpha=0.6)
+             ax.text(0.96, 0.96, perf_str, transform=ax.transAxes, fontsize=10,
+                     verticalalignment='top', horizontalalignment='right', bbox=perf_props)
+        else:
+             print("Warning: Failed to compute metrics for annotation.")
+    except ImportError:
+        print("Warning: Could not import airfoil_fitness for plot annotation.")
+    
     ax.grid(True, linestyle=":")
-    ax.legend()
+    ax.legend(loc='lower right')
     
     fig_dir = _infer_output_dir(out_csv, "geometry")
     base = os.path.splitext(os.path.basename(out_csv))[0]
@@ -187,6 +262,9 @@ def plot_geometry(best_vec, out_csv: str = None, alpha: float = 3.0):
     return outpath
 
 def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, out_csv: str = None, outpath=None):
+    """
+    Visualize the optimized CST coefficients (Au0..2, Al0..2) as a bar chart.
+    """
     if plt is None: return None
     
     labels = [f"Au{i}" for i in range(3)] + [f"Al{i}" for i in range(3)]
@@ -212,6 +290,12 @@ def plot_coeff_bar(best_vec, Re=1e6, alpha=3.0, out_csv: str = None, outpath=Non
     return outpath
 
 def plot_polar(best_vec, Re=1e6, out_csv: str = None):
+    """
+    Generate and plot the Drag Polar (Cl vs Cd) and Lift Curve (Cl vs Alpha).
+
+    Note: This triggers a new XFOIL run (ASEQ) for the optimized geometry.
+    Range: -5 to +15 degrees.
+    """
     if plt is None: return None
     
     # We need a .dat file to run polar

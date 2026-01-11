@@ -1,0 +1,10 @@
+# Enforce LF line endings for shell scripts (critical for Linux/Mac/WSL)
+*.sh text eol=lf
+
+# Batch files should use CRLF
+*.bat text eol=crlf
+
+# Standardize other text files
+*.py text
+*.md text
+*.txt text

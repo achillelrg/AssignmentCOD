@@ -1,3 +1,19 @@
+"""
+Part B Experiment Driver: Airfoil Optimization.
+
+This script orchestrates the aerodynamic optimization process (Part B).
+It connects the optimizer (PSO or GA) with the Physics Engine (XFOIL).
+
+Key Responsibilities:
+1.  **Configuration:** Parses CLI arguments (pop size, budget, solver).
+2.  **Environment:** Cleans temp folders to prevent XFOIL collisions.
+3.  **Estimation:** Benchmarks system speed to estimate runtime.
+4.  **Optimization:** Runs the loop using `experiments.run_opt.optimize` (shared driver).
+5.  **Plotting:** Automatically generates Geometry and Convergence plots upon completion.
+
+Usage:
+    python experiments/run_airfoil.py --solver pso --evals 1000 --jobs 4
+"""
 import os
 from datetime import datetime
 import json
@@ -39,81 +55,8 @@ def main():
 
     cleanup_temp() # Always clean temp/ at start
 
-    # Active Calibration Runtime Estimation
-    def estimate_runtime_active(n_points, n_iter, total_evals, n_jobs):
-        print("--- Benchmarking System Speed (Active) ---")
-        
-        # 1. Create a "Heavy" valid airfoil (NACA 0012-ish CST)
-        # Random valid-ish vector
-        test_vec = [0.1, 0.15, 0.1,  -0.1, -0.1, -0.1] 
-        
-        # 2. Benchmark logic
-        import time
-        from multiprocessing import Pool
-        
-        # We want to measure the throughput of the Pool, not just single eval
-        n_bench = max(n_jobs, 999) # Not used really
-        n_bench = n_jobs * 2 if n_jobs > 1 else 3
-        
-        # Create a small batch of tasks
-        tasks = [np.array(test_vec) for _ in range(n_bench)]
-        
-        from functools import partial
-        # We need a temporary fitness function just for benchmarking
-        # Use partial to pre-bind arguments
-        bench_fn = partial(airfoil_fitness, Re=1e6, alpha=3.0, n_points=n_points, n_iter=n_iter)
-
-        start = time.time()
-        
-        if n_jobs > 1:
-            # Benchmark Parallel Throughput
-            try:
-                with Pool(processes=n_jobs) as pool:
-                    _ = pool.map(bench_fn, tasks)
-            except Exception as e:
-                print(f"Benchmark failed (Pool error): {e}. Fallback to guess.")
-                return 600.0 # Random guess
-        else:
-            # Benchmark Serial
-            for t in tasks:
-                bench_fn(t)
-                
-        end = time.time()
-        duration = end - start
-        
-        # Speed per individual eval? No, we measured batch time.
-        # Throughput = n_bench / duration (evals per second)
-        if n_jobs > 1:
-            # Observed empirical speed for this machine is ~2-3 evals/sec per job
-            # The benchmark often overestimates. We clamp it.
-            throughput = min(n_bench / duration, 4.0 * n_jobs)
-        else:
-            throughput = n_bench / duration 
-        
-        print(f"Measured Throughput: {throughput:.2f} evals/sec (Benchmarked {n_bench} items in {duration:.2f}s)")
-        
-        total_seconds = total_evals / throughput
-        
-        # Correction Factor:
-        # Benchmarking uses "Clean" airfoils (fast).
-        # Optimization finds "Dirty" airfoils (slow, many iterations).
-        # We apply a factor of 5.0 to be safe.
-        total_seconds *= 5.0 
-        
-        return total_seconds
-
-    predicted_seconds = estimate_runtime_active(args.points, args.iter, args.evals, args.jobs)
-    predicted_mins = predicted_seconds / 60.0
-    
-    def format_time_est(seconds):
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        return f"{h}h {m}m" if h else f"{m}m {s}s"
-
-    print(f"--- Simulation Estimate ---")
-    print(f"Points: {args.points} | Iter: {args.iter} | Evals: {args.evals} | Jobs: {args.jobs}")
-    print(f"Estimated Max Runtime: {format_time_est(predicted_seconds)} (Conservative)")
-    print(f"---------------------------")
+    # Runtime Estimation removed as per user request (was inaccurate).
+    # The real-time ETA in run_opt.py provides better feedback.
 
     # Handle cleaning request
     if args.clean:

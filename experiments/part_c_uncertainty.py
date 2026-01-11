@@ -1,3 +1,19 @@
+"""
+Part C.1: Uncertainty Analysis (Robustness).
+
+This script performs a Monte Carlo simulation to quantify the robustness of the 
+Optimal Airfoil design against operational uncertainties (e.g., gust loads).
+
+Methodology:
+1.  **Load:** Logic to find the best design (from Part C Surrogate or Part B).
+2.  **Perturb:** Sample Angle of Attack (Alpha) from a Normal Distribution N(3.0, 0.1).
+3.  **Evaluate:** Run XFOIL in parallel for all perturbed conditions.
+4.  **Analyze:** Compute Mean, Std Dev, and Coefficient of Variation for Cl/Cd.
+
+Outputs:
+- Robustness Report (txt)
+- Histograms (png)
+"""
 
 import os
 import json

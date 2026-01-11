@@ -118,6 +118,25 @@ def _run_lib_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
 # ---------------------------------------------------------------------------
 
 def _run_xfoil_script(script: str, workdir: str = ".", timeout: int = 10) -> Tuple[int, str, str, str]:
+    """
+    Execute an XFOIL input script via a subprocess call.
+
+    Handles cross-platform execution:
+    - **Windows:** Runs `.exe` directly or bridges to WSL for Linux binaries.
+    - **Linux/Mac:** Direct execution.
+
+    Features:
+    - **Timeouts:** Kills the process if XFOIL hangs (common with bad geometries).
+    - **Stdio:** Captures stdout/stderr for parsing.
+
+    Args:
+        script (str): The sequence of XFOIL commands (inputs).
+        workdir (str): Directory where temporary files are created.
+        timeout (int): Max execution time in seconds (default 10).
+
+    Returns:
+        Tuple[int, str, str, str]: (Exit Code, Stdout, Stderr, Path to script file).
+    """
     os.makedirs(workdir, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".inp", dir=workdir, encoding="ascii") as f:
         f.write(script)
@@ -126,8 +145,21 @@ def _run_xfoil_script(script: str, workdir: str = ".", timeout: int = 10) -> Tup
     
     try:
         with open(script_path, "r") as f_in:
+            cmd = [XFOIL_EXE]
+            # [Hero Run Fix] Functionality to run Linux XFOIL on Windows using WSL
+            if os.name == 'nt':
+                # Check if it is likely a linux binary (no extension)
+                if not str(XFOIL_EXE).lower().endswith(".exe"):
+                    # Convert Windows path to WSL path
+                    # e.g. C:\Users\... -> /mnt/c/Users/...
+                    wsl_path = XFOIL_EXE.replace("\\", "/")
+                    if ":" in wsl_path:
+                        drive, tail = wsl_path.split(":", 1)
+                        wsl_path = f"/mnt/{drive.lower()}{tail}"
+                    cmd = ["wsl", wsl_path]
+
             proc = subprocess.run(
-                [XFOIL_EXE], 
+                cmd, 
                 stdin=f_in, 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE, 
@@ -135,10 +167,25 @@ def _run_xfoil_script(script: str, workdir: str = ".", timeout: int = 10) -> Tup
                 timeout=timeout
             )
         return proc.returncode, proc.stdout.decode(errors="ignore"), proc.stderr.decode(errors="ignore"), script_path
-    except subprocess.TimeoutExpired:
-        return -1, "", "TimeoutExpired", script_path
+    except subprocess.TimeoutExpired as e:
+        out_str = e.stdout.decode(errors="ignore") if e.stdout else ""
+        err_str = e.stderr.decode(errors="ignore") if e.stderr else ""
+        return -1, out_str, f"TimeoutExpired\n{err_str}", script_path
 
 def _parse_xfoil_stdout(out: str) -> dict:
+    """
+    Parse the Standard Output of XFOIL to extract aerodynamic coefficients.
+
+    Searches specifically for lines containing "a =" and "CL =".
+    Note: This is a fallback/quick method. Reliability depends on exact XFOIL version output.
+
+    Args:
+        out (str): The raw stdout string from the XFOIL process.
+
+    Returns:
+        dict: A dictionary containing 'CL', 'CD', 'CM', and 'alpha' if found.
+              Returns empty dict if parsing fails.
+    """
     results_map = {}
     lines = out.splitlines()
     for i, line in enumerate(lines):
@@ -173,9 +220,14 @@ def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
     
     shutil.copy(dat_path, local_dat_path)
     
-    # Fix line endings (Force LF on Linux to prevent XFOIL issues)
+    # Detect if we are using WSL (Windows host, Linux binary)
+    use_wsl = False
+    if os.name == 'nt' and not str(XFOIL_EXE).lower().endswith(".exe"):
+        use_wsl = True
+
+    # Fix line endings (Force LF on Linux OR if using WSL to prevent XFOIL issues)
     with open(local_dat_path, 'rb') as f: content = f.read()
-    if os.name == 'posix':
+    if os.name == 'posix' or use_wsl:
         content = content.replace(b'\r\n', b'\n')
     with open(local_dat_path, 'wb') as f: f.write(content)
 
@@ -186,16 +238,26 @@ def _run_subprocess_single(dat_path, alpha, Re, mach, n_iter):
         f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
         f"ALFA {alpha}", "", "QUIT"
     ]
-    script = ("\r\n" if os.name == 'nt' else "\n").join(script_lines) + "\n"
+    
+    # Use LF for script if on Linux or WSL
+    join_char = "\n" if (os.name == 'posix' or use_wsl) else "\r\n"
+    script = join_char.join(script_lines) + join_char
     
     rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
     
     # Cleanup
     for p in [spath, local_dat_path]:
-        if os.path.exists(p): os.remove(p)
+        try:
+            if os.path.exists(p): os.remove(p)
+        except OSError:
+            pass # Ignore cleanup errors
 
+    # print(f"--- DEBUG XFOIL OUTPUT ---\n{out}\n-------------------------")
     results = _parse_xfoil_stdout(out)
-    if not results: return None, None, None
+    
+    if not results: 
+        # print(f"[DEBUG] XFOIL Parsing Failed.")
+        return None, None, None
     best_a = min(results.keys(), key=lambda x: abs(x - alpha))
     if abs(best_a - alpha) > 0.1: return None, None, None # Too far
     return results[best_a]
@@ -208,8 +270,14 @@ def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
     os.makedirs(XFOIL_DIR, exist_ok=True)
     shutil.copy(dat_path, local_dat_path)
     
+    # Detect if we are using WSL
+    use_wsl = False
+    if os.name == 'nt' and not str(XFOIL_EXE).lower().endswith(".exe"):
+        use_wsl = True
+    
+    # Line endings
     with open(local_dat_path, 'rb') as f: content = f.read()
-    if os.name == 'posix':
+    if os.name == 'posix' or use_wsl:
         content = content.replace(b'\r\n', b'\n')
     with open(local_dat_path, 'wb') as f: f.write(content)
 
@@ -220,11 +288,19 @@ def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
         f"VISC {Re}", f"MACH {mach}", f"ITER {n_iter}",
         f"ASEQ {a_start} {a_end} {a_step}", "", "QUIT"
     ]
-    script = ("\r\n" if os.name == 'nt' else "\n").join(script_lines) + "\n"
+    
+    # Use LF for script if on Linux or WSL
+    join_char = "\n" if (os.name == 'posix' or use_wsl) else "\r\n"
+    script = join_char.join(script_lines) + join_char
+    
     rc, out, err, spath = _run_xfoil_script(script, workdir=XFOIL_DIR)
     
+    # Cleanup
     for p in [spath, local_dat_path]:
-        if os.path.exists(p): os.remove(p)
+        try:
+            if os.path.exists(p): os.remove(p)
+        except OSError:
+            pass # Ignore cleanup errors
 
     results = _parse_xfoil_stdout(out)
     alphas, cls, cds, cms = [], [], [], []
@@ -241,6 +317,24 @@ def _run_subprocess_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter):
 # ---------------------------------------------------------------------------
 
 def run_xfoil_single_alpha(dat_path: str, alpha: float = 3.0, Re: float = 1e6, mach: float = 0.1, n_iter: int = 200) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """
+    Run a single-point XFOIL simulation used for optimization fitness evaluation.
+
+    Dispatches to:
+    - `xfoil` Python library (if installed/detected).
+    - `subprocess` wrapper (using local executable) otherwise.
+
+    Args:
+        dat_path (str): Absolute path to the airfoil coordinate file (.dat).
+        alpha (float): Angle of attack (degrees).
+        Re (float): Reynolds number.
+        mach (float): Mach number.
+        n_iter (int): Max iterations for the viscous solution.
+
+    Returns:
+        Tuple[float, float, float]: (Cl, Cd, Cm). 
+        Returns (None, None, None) if convergence fails or XFOIL crashes.
+    """
     if HAS_XFOIL_LIB:
         return _run_lib_single(dat_path, alpha, Re, mach, n_iter)
     else:
@@ -248,6 +342,23 @@ def run_xfoil_single_alpha(dat_path: str, alpha: float = 3.0, Re: float = 1e6, m
         return _run_subprocess_single(dat_path, alpha, Re, mach, n_iter)
 
 def run_xfoil_polar(dat_path: str, a_start: float, a_end: float, a_step: float, Re: float = 1e6, mach: float = 0.1, n_iter: int = 200) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Generate a full drag polar (Cl vs Cd) by sweeping specific angles of attack.
+
+    Used for post-optimization analysis and plotting.
+
+    Args:
+        dat_path (str): Path to airfoil file.
+        a_start (float): Start angle (e.g. -5).
+        a_end (float): End angle (e.g. 15).
+        a_step (float): Step size (e.g. 1.0).
+        Re (float): Reynolds number.
+        mach (float): Mach number.
+        n_iter (int): Max iterations per step.
+
+    Returns:
+        Tuple[np.ndarray, ...]: Parallel arrays of (Alpha, Cl, Cd, Cm).
+    """
     if HAS_XFOIL_LIB:
         return _run_lib_polar(dat_path, a_start, a_end, a_step, Re, mach, n_iter)
     else:

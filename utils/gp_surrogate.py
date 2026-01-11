@@ -8,8 +8,19 @@ import numpy as np
 
 def _rbf_kernel(X1: np.ndarray, X2: np.ndarray, length_scale: float, sigma_f: float) -> np.ndarray:
     """
-    Squared exponential (RBF) kernel:
-        k(x, x') = sigma_f^2 * exp(-0.5 * ||(x - x') / l||^2)
+    Compute the Squared Exponential (RBF) covariance matrix between X1 and X2.
+
+    Formula:
+        k(x, x') = sigma_f^2 * exp( -0.5 * ||x - x'||^2 / l^2 )
+
+    Args:
+        X1 (np.ndarray): shape (n1, D)
+        X2 (np.ndarray): shape (n2, D)
+        length_scale (float): The length scale 'l', controlling smoothness.
+        sigma_f (float): The signal variance 'sigma_f', controlling amplitude.
+
+    Returns:
+        np.ndarray: Covariance matrix of shape (n1, n2).
     """
     X1 = np.atleast_2d(X1)
     X2 = np.atleast_2d(X2)
@@ -25,11 +36,14 @@ def _rbf_kernel(X1: np.ndarray, X2: np.ndarray, length_scale: float, sigma_f: fl
 @dataclass
 class GaussianProcessSurrogate:
     """
-    Simple Gaussian Process regressor with an RBF kernel.
+    A lightweight Gaussian Process Regressor using an RBF Kernel.
 
-    - Input X is normalised to [0, 1] per dimension.
-    - Output y is standardised to zero mean, unit variance.
-    - Hyperparameters are fixed (no optimisation to keep things simple).
+    Designed for the COD Assignment to avoid heavy dependencies (like sklearn).
+    
+    Attributes:
+        length_scale (float): Kernel length scale (fixed).
+        sigma_f (float): Kernel signal variance (fixed).
+        sigma_n (float): Observation noise variance (for numerical stability).
     """
     length_scale: float = 0.3
     sigma_f: float = 1.0
@@ -46,18 +60,26 @@ class GaussianProcessSurrogate:
     alpha_: Optional[np.ndarray] = None      # (K^-1 y) vector
 
     def _scale_X(self, X: np.ndarray) -> np.ndarray:
-        """Min-max normalise X to [0, 1] using training bounds."""
+        """Min-max normalize input X to [0, 1] using training bounds."""
         X = np.asarray(X, float)
         return (X - self.X_min_) / (self.X_max_ - self.X_min_ + 1e-12)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "GaussianProcessSurrogate":
         """
-        Fit GP to training data.
+        Train the GP model on the provided dataset.
 
-        Parameters
-        ----------
-        X : (n_samples, n_features)
-        y : (n_samples,)
+        Performs:
+        1.  **Normalization:** Scales X to [0, 1] and y to Standard Normal (0, 1).
+        2.  **Kernel Construction:** Builds the covariance matrix K.
+        3.  **Cholesky Decomposition:** Computes L such that K = L @ L.T.
+        4.  **Weights:** Solves for alpha = K^-1 * y.
+
+        Args:
+            X (np.ndarray): Input training data (n_samples, n_features).
+            y (np.ndarray): Target values (n_samples,).
+
+        Returns:
+            self: The fitted regressor.
         """
         X = np.asarray(X, float)
         y = np.asarray(y, float).ravel()
@@ -92,17 +114,15 @@ class GaussianProcessSurrogate:
 
     def predict(self, X: np.ndarray, return_std: bool = False) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Predict mean (and optional std) at new points.
+        Predict the mean and standard deviation for new inputs.
 
-        Parameters
-        ----------
-        X : (n_samples, n_features)
-        return_std : bool
+        Args:
+            X (np.ndarray): New input points (n_samples, n_features).
+            return_std (bool): If True, returns the predictive standard deviation (uncertainty).
 
-        Returns
-        -------
-        y_mean : (n_samples,)
-        y_std  : (n_samples,) or None
+        Returns:
+            y_mean (np.ndarray): Predicted values (rescaled to original units).
+            y_std (np.ndarray or None): Uncertainty estimates (if return_std=True).
         """
         if self.X_train_ is None:
             raise RuntimeError("GP not fitted yet. Call fit() first.")
